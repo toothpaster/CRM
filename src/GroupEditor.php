@@ -28,7 +28,9 @@ if (array_key_exists('GroupID', $_GET)) {
 
 $thisGroup = GroupQuery::create()->findOneById($iGroupID);   //get this group from the group service.
 $rsGroupTypes = ListOptionQuery::create()->filterById('3')->find();     // Get Group Types for the drop-down
-$rsGroupRoleSeed = GroupQuery::create()->filterByRoleListId(['min' => 0], $comparison)->find();     //Group Group Role List
+$rsGroupRoleSeed = isset($comparison) ? GroupQuery::create()->filterByRoleListId(['min' => 0], $comparison)->find() : array();     //Group Group Role List
+
+//
 $aBreadcrumbs = PageHeader::breadcrumbs([
     [gettext('Groups'), '/groups/dashboard'],
     [$thisGroup ? InputUtils::escapeHTML($thisGroup->getName()) : gettext('New Group'), $thisGroup ? '/groups/view/' . $iGroupID : ''],
