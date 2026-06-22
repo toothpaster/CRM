@@ -359,7 +359,6 @@ if ($bCanManageGroups) {
     window.CRM.currentGroupName  = <?= json_encode($thisGroup->getName(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
     window.CRM.groupIsActive     = <?= $thisGroup->isActive() ? 'true' : 'false' ?>;
     window.CRM.groupEmailExport  = <?= $thisGroup->isIncludeInEmailExport() ? 'true' : 'false' ?>;
-    window.CRM.groupPhoneNumbers = <?= json_encode($sPhoneLink, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 </script>
 <script src="<?= $sRootPath ?>/skin/js/GroupView.js?v=<?= filemtime(SystemURLs::getDocumentRoot() . '/skin/js/GroupView.js') ?>"></script>
 

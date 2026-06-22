@@ -208,7 +208,7 @@ require SystemURLs::getDocumentRoot() . '/Include/Header.php';
             <div class="row mb-3">
               <label class="col-sm-3 col-form-label" for="tablePageLength"><?= gettext("Rows per page") ?></label>
               <div class="col-sm-9">
-                <?php $tableVal = $_userTableSize !== '' ? $_userTableSize : '10'; ?>
+                <?php $tableVal = $_userTableSize !== '' ? $_userTableSize : '100'; ?>
                 <select id="tablePageLength" class="form-select">
                   <option value="10"<?= $tableVal === '10' ? ' selected' : '' ?>>10</option>
                   <option value="25"<?= $tableVal === '25' ? ' selected' : '' ?>>25</option>

@@ -89,7 +89,7 @@ $MenuFirst = 1;
   $currentUser = AuthenticationManager::getCurrentUser();
   $tableSizeSetting = $currentUser->getSetting("ui.table.size");
   if (empty($tableSizeSetting)) {
-      $tableSize = 10;
+      $tableSize = 100;
   } else {
       $tableSize = $tableSizeSetting->getValue();
   }
