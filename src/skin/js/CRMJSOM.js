@@ -185,7 +185,7 @@ window.CRM.groups = {
     if (selectOptions.Type & window.CRM.groups.selectTypes.Group) {
       options.title = i18next.t("Select Group");
       options.message +=
-        '<span>' +
+        "<span>" +
         i18next.t("Please select target group for members") +
         ':</span>\
                   <select name="targetGroupSelection" id="targetGroupSelection" class="form-control"></select>';

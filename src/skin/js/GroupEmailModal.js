@@ -41,8 +41,8 @@
   var bootstrapModal = null;
 
   var ctx = {
-    emails: "",   // CSV of email addresses
-    mode: "to",   // "to" | "bcc" | "individual"
+    emails: "", // CSV of email addresses
+    mode: "to", // "to" | "bcc" | "individual"
     groupId: window.CRM && window.CRM.currentGroup ? String(window.CRM.currentGroup) : "",
     // cartPage — auto-detected: true when in the cart view (no group ID)
     isCartPage: !!(window.CRM && window.CRM.currentGroup ? false : /\/cart/.test(window.location.pathname)),
@@ -70,7 +70,8 @@
     "{count} recipients": "{count} recipients",
     Tip: "Tip",
     "Ctrl+Enter to send": "Ctrl+Enter to send",
-    "Use {firstName} and {lastName} as placeholders": "Use {firstName} and {lastName} as placeholders — they will be replaced with each person's name",
+    "Use {firstName} and {lastName} as placeholders":
+      "Use {firstName} and {lastName} as placeholders — they will be replaced with each person's name",
   };
 
   function _t(key) {
@@ -86,14 +87,22 @@
   // Normalize email CSV: split on either comma or semicolon (handles user's sMailtoDelimiter)
   function _normalizeEmails(str) {
     if (!str) return "";
-    return str.split(/[,;]/).map(function (e) { return e.trim(); }).filter(Boolean).join(",");
+    return str
+      .split(/[,;]/)
+      .map(function (e) {
+        return e.trim();
+      })
+      .filter(Boolean)
+      .join(",");
   }
 
   function _recipientCount(emails) {
     if (!emails) return 0;
-    return _normalizeEmails(emails).split(",").filter(function (e) {
-      return e.trim().length > 0;
-    }).length;
+    return _normalizeEmails(emails)
+      .split(",")
+      .filter(function (e) {
+        return e.trim().length > 0;
+      }).length;
   }
 
   function _recipientLabel(emails) {
@@ -123,47 +132,61 @@
       '<div class="modal-dialog modal-dialog-centered modal-lg">',
       '  <div class="modal-content">',
       '    <div class="modal-header">',
-      '      <h5 class="modal-title">' + _t("Compose Email") + '</h5>',
+      '      <h5 class="modal-title">' + _t("Compose Email") + "</h5>",
       '      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>',
-      '    </div>',
+      "    </div>",
       '    <form id="gem-form" class="modal-body">',
       '      <div class="mb-3">',
-      '        <label class="form-label" for="gem-to">' + _t("To") + ' <span id="gem-to-count" class="text-body-tertiary small"></span>' +
-      '          <span id="gem-mode-badge" class="badge bg-info-lt text-info ms-2"></span></label>',
+      '        <label class="form-label" for="gem-to">' +
+        _t("To") +
+        ' <span id="gem-to-count" class="text-body-tertiary small"></span>' +
+        '          <span id="gem-mode-badge" class="badge bg-info-lt text-info ms-2"></span></label>',
       '        <input type="text" id="gem-to" class="form-control" readonly />',
-      '      </div>',
+      "      </div>",
       '      <div class="mb-3">',
-      '        <label class="form-label" for="gem-subject">' + _t("Subject") + '</label>',
+      '        <label class="form-label" for="gem-subject">' + _t("Subject") + "</label>",
       '        <input type="text" id="gem-subject" class="form-control" placeholder="' + _t("Subject") + '" />',
-      '      </div>',
+      "      </div>",
       '      <div id="gem-placeholder-hint" class="alert alert-info d-none py-2 mb-3" role="alert">',
-      '        <i class="fa-solid fa-circle-info me-1"></i> ' + _t("Use {firstName} and {lastName} as placeholders") + '',
-      '      </div>',
+      '        <i class="fa-solid fa-circle-info me-1"></i> ' +
+        _t("Use {firstName} and {lastName} as placeholders") +
+        "",
+      "      </div>",
       '      <div class="mb-3">',
-      '        <label class="form-label" for="gem-body">' + _t("Message") + '</label>',
+      '        <label class="form-label" for="gem-body">' + _t("Message") + "</label>",
       '        <textarea id="gem-body" class="form-control" rows="8" placeholder="' + _t("Message") + '"></textarea>',
-      '        <div class="text-body-tertiary small mt-1"><i class="fa-regular fa-keyboard me-1"></i> ' + _t("Tip") + ': ' + _t("Ctrl+Enter to send") + '</div>',
-      '      </div>',
+      '        <div class="text-body-tertiary small mt-1"><i class="fa-regular fa-keyboard me-1"></i> ' +
+        _t("Tip") +
+        ": " +
+        _t("Ctrl+Enter to send") +
+        "</div>",
+      "      </div>",
       '      <div id="gem-status" class="alert d-none mb-0" role="alert"></div>',
-      '    </form>',
+      "    </form>",
       '    <div class="modal-footer">',
-      '      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="gem-cancel-btn">' + _t("Cancel") + '</button>',
+      '      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="gem-cancel-btn">' +
+        _t("Cancel") +
+        "</button>",
       '      <button type="button" class="btn btn-primary" id="gem-send-btn">',
-      '        <i class="fa-solid fa-paper-plane me-1"></i>' + _t("Send") + '</button>',
-      '    </div>',
-      '  </div>',
-      '</div>',
+      '        <i class="fa-solid fa-paper-plane me-1"></i>' + _t("Send") + "</button>",
+      "    </div>",
+      "  </div>",
+      "</div>",
     ].join("\n");
 
     document.body.appendChild(el);
     modalDom = el;
 
     // Tear down on hide
-    el.addEventListener("hidden.bs.modal", function () {
-      var inst = window.bootstrap.Modal.getInstance(el);
-      if (inst) inst.dispose();
-      bootstrapModal = null;
-    }, { once: true });
+    el.addEventListener(
+      "hidden.bs.modal",
+      function () {
+        var inst = window.bootstrap.Modal.getInstance(el);
+        if (inst) inst.dispose();
+        bootstrapModal = null;
+      },
+      { once: true },
+    );
   }
 
   // ------------------------------------------------------------------ //
@@ -302,9 +325,13 @@
     if (parts.length <= 3) {
       toInput.value = ctx.emails;
     } else {
-      toInput.value = parts.slice(0, 2).map(function (p) {
-        return p.trim();
-      }).join(", ") + ", \u2026";
+      toInput.value =
+        parts
+          .slice(0, 2)
+          .map(function (p) {
+            return p.trim();
+          })
+          .join(", ") + ", \u2026";
     }
     toCount.textContent = "(" + _recipientLabel(ctx.emails) + ")";
 
@@ -333,9 +360,13 @@
     }
 
     // Focus subject on show
-    modalDom.addEventListener("shown.bs.modal", function () {
-      subjectField.focus();
-    }, { once: true });
+    modalDom.addEventListener(
+      "shown.bs.modal",
+      function () {
+        subjectField.focus();
+      },
+      { once: true },
+    );
 
     // Send button (fresh clone to avoid stale listeners)
     var newBtn = sendBtn.cloneNode(true);
@@ -373,7 +404,9 @@
           _override();
           return;
         }
-        window.setTimeout(function () { retry(n - 1); }, 100);
+        window.setTimeout(function () {
+          retry(n - 1);
+        }, 100);
       };
       retry(maxRetries);
       return;
