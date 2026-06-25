@@ -361,6 +361,7 @@ if ($bCanManageGroups) {
     window.CRM.groupEmailExport  = <?= $thisGroup->isIncludeInEmailExport() ? 'true' : 'false' ?>;
 </script>
 <script src="<?= $sRootPath ?>/skin/js/GroupView.js?v=<?= filemtime(SystemURLs::getDocumentRoot() . '/skin/js/GroupView.js') ?>"></script>
+<script src="<?= $sRootPath ?>/skin/js/GroupEmailModal.js?v=<?= filemtime(SystemURLs::getDocumentRoot() . '/skin/js/GroupEmailModal.js') ?>"></script>
 
 <?php
 require SystemURLs::getDocumentRoot() . '/Include/Footer.php';

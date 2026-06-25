@@ -27,14 +27,28 @@ $ListTitleText = gettext('Your cart contains') . ' ' . count($cartPeople) . ' ' 
       <a href="<?= SystemURLs::getRootPath() ?>/v2/map?groupId=0" class="btn btn-outline-info" title="<?= gettext('Map cart items') ?>"><i class="fa-solid fa-map-marker me-2"></i><?= gettext('Map') ?></a>
       <a href="<?= SystemURLs::getRootPath() ?>/Reports/NameTags.php?labeltype=74536&labelfont=times&labelfontsize=36" class="btn btn-outline-secondary" title="<?= gettext('Print name tags') ?>"><i class="fa-solid fa-file-pdf me-2"></i><?= gettext('Tags') ?></a>
     </div>
-    <?php if (AuthenticationManager::getCurrentUser()->isEmailEnabled()) { ?>
-      <div class="btn-group" role="group">
-        <a href="mailto:<?= InputUtils::escapeAttribute($sEmailLink) ?>" class="btn btn-outline-info" title="<?= gettext('Email cart items') ?>" target="_blank" rel="noopener noreferrer">
+    <?php
+    // Build email CSV directly from cart people (bypasses user's sMailtoDelimiter config)
+    $cartEmails = [];
+    foreach ($cartPeople as $p) {
+        $email = trim((string) $p->getEmail());
+        if (!empty($email)) {
+            $cartEmails[] = $email;
+        }
+    }
+    $cartEmails = implode(',', $cartEmails);
+    ?>
+    <?php if (AuthenticationManager::getCurrentUser()->isEmailEnabled() && !empty($cartEmails)) { ?>
+      <div class="btn-group" role="group" id="cart-email-actions">
+        <button type="button" class="btn btn-outline-info" data-action="mailto" data-emails="<?= InputUtils::escapeAttribute($cartEmails) ?>" title="<?= gettext('Email cart items') ?>">
           <i class="fa-solid fa-paper-plane me-2"></i><?= gettext('Email') ?>
-        </a>
-        <a href="mailto:?bcc=<?= InputUtils::escapeAttribute($sEmailLink) ?>" class="btn btn-outline-secondary" title="<?= gettext('Email with hidden recipients') ?>" target="_blank" rel="noopener noreferrer">
+        </button>
+        <button type="button" class="btn btn-outline-info" data-action="email-individual" data-emails="<?= InputUtils::escapeAttribute($cartEmails) ?>" title="<?= gettext('Email each person individually') ?>">
+          <i class="fa-regular fa-envelope-open me-2"></i><?= gettext('Email Individually') ?>
+        </button>
+        <button type="button" class="btn btn-outline-secondary" data-action="bcc" data-emails="<?= InputUtils::escapeAttribute($cartEmails) ?>" title="<?= gettext('Email with hidden recipients') ?>">
           <i class="fa-solid fa-user-secret me-2"></i>BCC
-        </a>
+        </button>
       </div>
     <?php } ?>
     <a href="<?= SystemURLs::getRootPath() ?>/DirectoryReports.php?cartdir=Cart+Directory" class="btn btn-outline-warning" title="<?= gettext('Generate phone directory') ?>">
@@ -121,7 +135,19 @@ $ListTitleText = gettext('Your cart contains') . ' ' . count($cartPeople) . ' ' 
 <script nonce="<?= SystemURLs::getCSPNonce() ?>">
   $(document).ready(function () {
     $("#cart-listing-table").DataTable(window.CRM.plugin.dataTable);
+
+    // Delegate email button clicks to the modal plugin
+    $("#cart-email-actions").on("click", "[data-action='mailto']", function () {
+      window.CRM.comm.openMailto($(this).data("emails"));
+    });
+    $("#cart-email-actions").on("click", "[data-action='bcc']", function () {
+      window.CRM.comm.openBcc($(this).data("emails"));
+    });
+    $("#cart-email-actions").on("click", "[data-action='email-individual']", function () {
+      window.CRM.comm.openIndividual($(this).data("emails"));
+    });
   });
 </script>
+<script src="<?= SystemURLs::getRootPath() ?>/skin/js/GroupEmailModal.js?v=<?= filemtime(SystemURLs::getDocumentRoot() . '/skin/js/GroupEmailModal.js') ?>"></script>
 <?php
 require SystemURLs::getDocumentRoot() . '/Include/Footer.php';

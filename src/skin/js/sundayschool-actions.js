@@ -204,6 +204,13 @@
               "</button>",
           );
           menu.append(
+            '<button class="dropdown-item" data-action="email-individual" data-emails="' +
+              window.CRM.escapeHtml(data.all) +
+              '"><i class="fa-regular fa-envelope-open me-2"></i>' +
+              i18next.t("Email Individually") +
+              "</button>",
+          );
+          menu.append(
             '<button class="dropdown-item" data-action="bcc" data-emails="' +
               window.CRM.escapeHtml(data.all) +
               '"><i class="fa-solid fa-user-secret me-2"></i>' +
@@ -247,6 +254,9 @@
     });
     $("#ss-action-toolbar").on("click", "[data-action='bcc']", function () {
       window.CRM.comm.openBcc($(this).data("emails"));
+    });
+    $("#ss-action-toolbar").on("click", "[data-action='email-individual']", function () {
+      window.CRM.comm.openIndividual($(this).data("emails"));
     });
 
     // ------------------------------------------------------------------ //
