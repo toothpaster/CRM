@@ -328,9 +328,9 @@ $app->group('/cart', function (RouteCollectorProxy $group): void {
             };
 
             if ($individual) {
-                // Build email→name map from PersonQuery for each cart person
-                $cartPeople = \ChurchCRM\dto\Cart::getCartPeople();
+                // Build email→name map — first from cart people, then fall back to PersonQuery
                 $emailNames = [];
+                $cartPeople = \ChurchCRM\dto\Cart::getCartPeople();
                 foreach ($cartPeople as $person) {
                     $peEmail = strtolower(trim((string) $person->getEmail()));
                     if (!empty($peEmail)) {
@@ -338,6 +338,22 @@ $app->group('/cart', function (RouteCollectorProxy $group): void {
                             'firstName' => $person->getFirstName(),
                             'lastName'  => $person->getLastName(),
                         ];
+                    }
+                }
+
+                // Fallback: query Person for any emails not found in the cart
+                foreach ($toAddresses as $email) {
+                    $lookup = strtolower(trim($email));
+                    if (!isset($emailNames[$lookup])) {
+                        $person = \ChurchCRM\model\ChurchCRM\PersonQuery::create()
+                            ->filterByEmail($email)
+                            ->findOne();
+                        if ($person !== null) {
+                            $emailNames[$lookup] = [
+                                'firstName' => $person->getFirstName(),
+                                'lastName'  => $person->getLastName(),
+                            ];
+                        }
                     }
                 }
 

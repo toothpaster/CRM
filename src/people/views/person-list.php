@@ -214,7 +214,13 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
 <div class="card">
     <div class="card-header">
         <h3 class="card-title"><i class="ti ti-users me-1"></i> <span id="people-title"></span></h3>
+        <div style="margin-left:auto">
+            <button type="button" class="btn btn-sm btn-info" id="people-list-email-btn">
+                <i class="fa-regular fa-envelope me-1"></i><?= gettext('Email') ?>
+            </button>
+        </div>
     </div>
+    <!-- DEBUG: people-list-email-btn should be above -->
     <div class="card-body">
         <table id="members" class="table table-vcenter table-hover data-table mb-0">
             <thead>
@@ -555,6 +561,22 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
 
         oTable = $('#members').DataTable(dataTableConfig);
 
+        // Email button — find mailto links in visible DataTable rows
+        $('#people-list-email-btn').on('click', function () {
+            var emails = [];
+            $('#members tbody tr:visible a[href^="mailto:"]').each(function () {
+                var email = $(this).text().trim();
+                if (email && email.indexOf('@') > -1) {
+                    emails.push(email);
+                }
+            });
+            if (emails.length === 0) {
+                window.CRM.notify(i18next.t('No email addresses available'), { type: 'warning', delay: 3000 });
+                return;
+            }
+            window.CRM.comm.openIndividual(emails.join(','));
+        });
+
         // Store TomSelect instances and filter configuration for later use
         var tomSelectInstances = {};
         var filterConfigs = [
@@ -863,8 +885,11 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
         window.CRM.onLocalesReady(initializePeopleList);
         // Photo viewer click handlers are registered globally in avatar-loader.ts
         // .delete-person clicks are handled globally by CRMJSOM.js
+
+
     });
 
 </script>
+<script src="<?= SystemURLs::getRootPath() ?>/skin/js/GroupEmailModal.js?v=<?= filemtime(SystemURLs::getDocumentRoot() . '/skin/js/GroupEmailModal.js') ?>"></script>
 <?php
 require SystemURLs::getDocumentRoot() .  '/Include/Footer.php';
