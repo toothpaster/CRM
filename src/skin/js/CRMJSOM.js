@@ -154,13 +154,13 @@ window.CRM.groups = {
         '<div class="modal-body">\
                   <input type="hidden" id="targetGroupAction">',
       buttons: {
-        confirm: {
-          label: i18next.t("OK"),
-          className: "btn-success",
-        },
         cancel: {
           label: i18next.t("Cancel"),
-          className: "btn-danger",
+          className: "btn-ghost-secondary",
+        },
+        confirm: {
+          label: i18next.t("OK"),
+          className: "btn-primary",
         },
       },
     };
@@ -185,7 +185,7 @@ window.CRM.groups = {
     if (selectOptions.Type & window.CRM.groups.selectTypes.Group) {
       options.title = i18next.t("Select Group");
       options.message +=
-        '<span style="color: red">' +
+        '<span>' +
         i18next.t("Please select target group for members") +
         ':</span>\
                   <select name="targetGroupSelection" id="targetGroupSelection" class="form-control"></select>';
@@ -201,7 +201,7 @@ window.CRM.groups = {
     if (selectOptions.Type & window.CRM.groups.selectTypes.Role) {
       options.title = i18next.t("Select Role");
       options.message +=
-        '<span style="color: red">' +
+        '<span style="margin-top: 1rem; display: block;">' +
         i18next.t("Please select target Role for members") +
         ':</span>\
                   <select name="targetRoleSelection" id="targetRoleSelection" class="form-control"></select>';
@@ -234,7 +234,6 @@ window.CRM.groups = {
               text: i18next.t(item.OptionName),
               id: String(item.OptionId),
             })),
-            dropdownParent: document.querySelector(".bootbox"),
           });
         });
       };
@@ -252,7 +251,23 @@ window.CRM.groups = {
       };
     }
     options.message += "</div>";
-    bootbox.dialog(options).init(initFunction).show();
+    const dialog = bootbox.dialog(options);
+    // Bootbox 6 returns a jQuery element — use the shown.bs.modal
+    // event to run the init function instead of a non-existent .init() API.
+    if (typeof initFunction === "function") {
+      dialog.on("shown.bs.modal", initFunction);
+    }
+
+    // Ensure TomSelect dropdowns render above the Bootstrap modal backdrop
+    // even when appended to document.body (no dropdownParent set).
+    if (!document.getElementById("ts-zindex-fix")) {
+      var style = document.createElement("style");
+      style.id = "ts-zindex-fix";
+      style.textContent =
+        ".ts-dropdown { z-index: 1060 !important; }" +
+        ".ts-dropdown .option { background-color: var(--tblr-card-bg, #fff); }";
+      document.head.appendChild(style);
+    }
 
     window.CRM.groups.get().done((rdata) => {
       const groupsList = rdata.map((item) => ({
@@ -266,8 +281,9 @@ window.CRM.groups = {
         valueField: "id",
         labelField: "text",
         searchField: "text",
+        placeholder: i18next.t("Search groups..."),
+        items: [],
         options: groupsList,
-        dropdownParent: document.querySelector(".bootbox"),
         onChange: (value) => {
           if (!value) return;
           const roleEl = document.getElementById("targetRoleSelection");
@@ -284,8 +300,8 @@ window.CRM.groups = {
               valueField: "id",
               labelField: "text",
               searchField: "text",
+              placeholder: i18next.t("Select a role"),
               options: rolesList,
-              dropdownParent: document.querySelector(".bootbox"),
             });
           });
         },
