@@ -416,7 +416,7 @@ $MenuFirst = 1;
               <?php foreach ($aBreadcrumbs as $crumb) : ?>
                 <?php if (!empty($crumb['active'])) : ?>
               <li class="breadcrumb-item active" aria-current="page"><?= $crumb['label'] ?></li>
-                <?php else : ?>
+                <?php elseif (isset($crumb['url'])) : ?>
               <li class="breadcrumb-item"><a href="<?= $crumb['url'] ?>"><?= $crumb['label'] ?></a></li>
                 <?php endif; ?>
               <?php endforeach; ?>

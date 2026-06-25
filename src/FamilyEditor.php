@@ -630,7 +630,7 @@ require_once __DIR__ . '/Include/Header.php';
                 </div>
             </div>
             <?php if (!SystemConfig::getBooleanValue('bHideLatLon')) { /* Lat/Lon can be hidden - General Settings */
-                if (!$bHaveXML) { // No point entering if values will just be overwritten
+                if (isset($bHaveXML) && !$bHaveXML) { // No point entering if values will just be overwritten
                     ?>
                     <div class="row">
                         <div class="mb-3 col-12 col-sm-6 col-md-3">
