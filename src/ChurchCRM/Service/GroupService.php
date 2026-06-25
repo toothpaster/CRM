@@ -7,6 +7,7 @@ use ChurchCRM\model\ChurchCRM\ListOption;
 use ChurchCRM\model\ChurchCRM\ListOptionQuery;
 use ChurchCRM\model\ChurchCRM\Person;
 use ChurchCRM\model\ChurchCRM\Person2group2roleP2g2r;
+use ChurchCRM\model\ChurchCRM\Person2group2roleP2g2rQuery;
 use ChurchCRM\model\ChurchCRM\PersonQuery;
 use ChurchCRM\Service\AuthService;
 use ChurchCRM\Utils\FunctionsUtils;
@@ -93,25 +94,30 @@ class GroupService
             $iRoleID = $group->getDefaultRole();
         }
 
-        $result = false;
-        try {
-            $person2group2role = new Person2group2roleP2g2r();
-            $person2group2role
+        // Check if person is already in the group
+        $existing = Person2group2roleP2g2rQuery::create()
+            ->filterByPersonId($iPersonID)
+            ->filterByGroupId($iGroupID)
+            ->findOne();
+
+        if ($existing) {
+            // Already a member — just update the role
+            $existing->setRoleId($iRoleID);
+            $existing->save();
+        } else {
+            // New member — insert
+            $membership = new Person2group2roleP2g2r();
+            $membership
                 ->setPersonId($iPersonID)
                 ->setGroupId($iGroupID)
                 ->setRoleId($iRoleID);
-            $person2group2role->save();
-            $result = true;
-        } catch (\Throwable $t) {
-            // do nothing
+            $membership->save();
         }
 
-        if ($result) {
-            // Check if this group has special properties
-            $group = GroupQuery::create()->findOneById($iGroupID);
-            if ($group->getHasSpecialProps()) {
-                $this->addPersonToGroupProperties($iGroupID, $iPersonID);
-            }
+        // Check if this group has special properties
+        $group = GroupQuery::create()->findOneById($iGroupID);
+        if ($group && $group->getHasSpecialProps()) {
+            $this->addPersonToGroupProperties($iGroupID, $iPersonID);
         }
 
         return $this->getGroupMembers($iGroupID, $iPersonID);
@@ -129,25 +135,30 @@ class GroupService
      */
     public function addUserToGroupInternal(int $iGroupID, int $iPersonID, int $iRoleID): array
     {
-        $result = false;
-        try {
-            $person2group2role = new Person2group2roleP2g2r();
-            $person2group2role
+        // Check if person is already in the group
+        $existing = Person2group2roleP2g2rQuery::create()
+            ->filterByPersonId($iPersonID)
+            ->filterByGroupId($iGroupID)
+            ->findOne();
+
+        if ($existing) {
+            // Already a member — just update the role
+            $existing->setRoleId($iRoleID);
+            $existing->save();
+        } else {
+            // New member — insert
+            $membership = new Person2group2roleP2g2r();
+            $membership
                 ->setPersonId($iPersonID)
                 ->setGroupId($iGroupID)
                 ->setRoleId($iRoleID);
-            $person2group2role->save();
-            $result = true;
-        } catch (\Throwable $t) {
-            // do nothing
+            $membership->save();
         }
 
-        if ($result) {
-            // Check if this group has special properties
-            $group = GroupQuery::create()->findOneById($iGroupID);
-            if ($group && $group->getHasSpecialProps()) {
-                $this->addPersonToGroupProperties($iGroupID, $iPersonID);
-            }
+        // Check if this group has special properties
+        $group = GroupQuery::create()->findOneById($iGroupID);
+        if ($group && $group->getHasSpecialProps()) {
+            $this->addPersonToGroupProperties($iGroupID, $iPersonID);
         }
 
         return $this->getGroupMembers($iGroupID, $iPersonID);
