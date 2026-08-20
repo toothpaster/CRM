@@ -21,35 +21,19 @@ $ListTitleText = gettext('Your cart contains') . ' ' . count($cartPeople) . ' ' 
         <a id="emptyCartToGroup" class="btn btn-outline-primary" title="<?= gettext('Add all cart items to a group') ?>"><i class="fa-solid fa-users me-2"></i><?= gettext('To Group') ?></a>
       <?php }
       if (AuthenticationManager::getCurrentUser()->isAddRecordsEnabled()) { ?>
-        <a href="<?= SystemURLs::getRootPath() ?>/CartToFamily.php" class="btn btn-outline-success" title="<?= gettext('Add cart items to a family') ?>"><i class="fa-solid fa-people-roof me-2"></i><?= gettext('To Family') ?></a>
+        <a href="<?= SystemURLs::getRootPath() ?>/people/cart/to-family" class="btn btn-outline-success" title="<?= gettext('Add cart items to a family') ?>"><i class="fa-solid fa-people-roof me-2"></i><?= gettext('To Family') ?></a>
       <?php } ?>
-      <a href="<?= SystemURLs::getRootPath() ?>/event/cart-to-event" class="btn btn-outline-info" title="<?= gettext('Check in to an event') ?>"><i class="fa-solid fa-ticket-alt me-2"></i><?= gettext('Check In') ?></a>
+      <a href="<?= SystemURLs::getRootPath() ?>/event/cart-to-event" class="btn btn-outline-info" title="<?= gettext('Check in to an event') ?>"><i class="fa-solid fa-ticket me-2"></i><?= gettext('Check In') ?></a>
       <a href="<?= SystemURLs::getRootPath() ?>/v2/map?groupId=0" class="btn btn-outline-info" title="<?= gettext('Map cart items') ?>"><i class="fa-solid fa-map-marker me-2"></i><?= gettext('Map') ?></a>
       <a href="<?= SystemURLs::getRootPath() ?>/Reports/NameTags.php?labeltype=74536&labelfont=times&labelfontsize=36" class="btn btn-outline-secondary" title="<?= gettext('Print name tags') ?>"><i class="fa-solid fa-file-pdf me-2"></i><?= gettext('Tags') ?></a>
     </div>
-    <?php
-    // Build email CSV directly from cart people (bypasses user's sMailtoDelimiter config)
-    $cartEmails = [];
-    foreach ($cartPeople as $p) {
-        $email = trim((string) $p->getEmail());
-        if (!empty($email)) {
-            $cartEmails[] = $email;
-        }
-    }
-    $cartEmails = implode(',', $cartEmails);
-    ?>
-    <?php if (AuthenticationManager::getCurrentUser()->isEmailEnabled() && !empty($cartEmails)) { ?>
-      <div class="btn-group" role="group" id="cart-email-actions">
-        <button type="button" class="btn btn-outline-info" data-action="mailto" data-emails="<?= InputUtils::escapeAttribute($cartEmails) ?>" title="<?= gettext('Email cart items') ?>">
-          <i class="fa-solid fa-paper-plane me-2"></i><?= gettext('Email') ?>
-        </button>
-        <button type="button" class="btn btn-outline-info" data-action="email-individual" data-emails="<?= InputUtils::escapeAttribute($cartEmails) ?>" title="<?= gettext('Email each person individually') ?>">
-          <i class="fa-regular fa-envelope-open me-2"></i><?= gettext('Email Individually') ?>
-        </button>
-        <button type="button" class="btn btn-outline-secondary" data-action="bcc" data-emails="<?= InputUtils::escapeAttribute($cartEmails) ?>" title="<?= gettext('Email with hidden recipients') ?>">
-          <i class="fa-solid fa-user-secret me-2"></i>BCC
-        </button>
-      </div>
+    <?php if (AuthenticationManager::getCurrentUser()->isEmailEnabled()) { ?>
+      <button type="button" class="btn btn-outline-info"
+              data-email-composer
+              data-email-endpoint="cart/emails"
+              data-email-title="<?= InputUtils::escapeAttribute(gettext('Email Cart Members')) ?>">
+        <i class="fa-solid fa-paper-plane me-2"></i><?= gettext('Email') ?>
+      </button>
     <?php } ?>
     <a href="<?= SystemURLs::getRootPath() ?>/DirectoryReports.php?cartdir=Cart+Directory" class="btn btn-outline-warning" title="<?= gettext('Generate phone directory') ?>">
       <i class="fa-solid fa-book me-2"></i><?= gettext('Directory') ?>
@@ -87,28 +71,30 @@ $ListTitleText = gettext('Your cart contains') . ' ' . count($cartPeople) . ' ' 
                     // fetch avatar info and set photo/initials as appropriate.
                     echo '<img data-image-entity-type="person" data-image-entity-id="' . $Person->getId() . '" class="avatar avatar-sm rounded-circle photo-small me-2" alt="" />';
                   ?>
-                  <a href="<?= $Person->getViewURI() ?>"><?= $Person->getFullName() ?></a>
+                  <a href="<?= $Person->getViewURI() ?>"><?= InputUtils::escapeHTML($Person->getFullName()) ?></a>
                 </div>
               </td>
-              <td><?= $Person->getAddress() ?></td>
-              <td><?= $Person->getEmail() ?></td>
+              <td><?= InputUtils::escapeHTML($Person->getAddress()) ?></td>
+              <td><?= InputUtils::escapeHTML($Person->getEmail()) ?></td>
               <td><?= $Person->getClassificationName() ?></td>
               <td><?= $Person->getFamilyRoleName() ?></td>
               <td>
                 <div class="dropdown">
                   <button class="btn btn-sm btn-ghost-secondary" type="button" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">
-                    <i class="ti ti-dots-vertical"></i>
+                    <i class="fa-solid fa-ellipsis-vertical"></i>
                   </button>
                   <div class="dropdown-menu dropdown-menu-end">
                     <a class="dropdown-item" href="<?= $Person->getViewURI() ?>">
-                      <i class="ti ti-eye me-2"></i><?= gettext('View') ?>
+                      <i class="fa-solid fa-eye me-2"></i><?= gettext('View') ?>
                     </a>
+                    <?php if (AuthenticationManager::getCurrentUser()->isEditRecordsEnabled()): ?>
                     <a class="dropdown-item" href="<?= SystemURLs::getRootPath() ?>/PersonEditor.php?PersonID=<?= $Person->getId() ?>">
-                      <i class="ti ti-pencil me-2"></i><?= gettext('Edit') ?>
+                      <i class="fa-solid fa-pencil me-2"></i><?= gettext('Edit') ?>
                     </a>
+                    <?php endif; ?>
                     <?php if ($Person->getFamId()) { ?>
                     <a class="dropdown-item" href="<?= SystemURLs::getRootPath() ?>/people/family/<?= $Person->getFamId() ?>">
-                      <i class="ti ti-users me-2"></i><?= gettext('View Family') ?>
+                      <i class="fa-solid fa-users me-2"></i><?= gettext('View Family') ?>
                     </a>
                     <?php } ?>
                     <div class="dropdown-divider"></div>
@@ -118,7 +104,7 @@ $ListTitleText = gettext('Your cart contains') . ' ' . count($cartPeople) . ' ' 
                       data-cart-type="person"
                       data-label-add="<?= gettext('Add to Cart') ?>"
                       data-label-remove="<?= gettext('Remove from Cart') ?>">
-                      <i class="ti ti-trash me-2"></i>
+                      <i class="fa-solid fa-trash me-2"></i>
                       <span class="cart-label"><?= gettext('Remove from Cart') ?></span>
                     </button>
                   </div>
@@ -135,19 +121,10 @@ $ListTitleText = gettext('Your cart contains') . ' ' . count($cartPeople) . ' ' 
 <script nonce="<?= SystemURLs::getCSPNonce() ?>">
   $(document).ready(function () {
     $("#cart-listing-table").DataTable(window.CRM.plugin.dataTable);
-
-    // Delegate email button clicks to the modal plugin
-    $("#cart-email-actions").on("click", "[data-action='mailto']", function () {
-      window.CRM.comm.openMailto($(this).data("emails"));
-    });
-    $("#cart-email-actions").on("click", "[data-action='bcc']", function () {
-      window.CRM.comm.openBcc($(this).data("emails"));
-    });
-    $("#cart-email-actions").on("click", "[data-action='email-individual']", function () {
-      window.CRM.comm.openIndividual($(this).data("emails"));
-    });
   });
 </script>
-<script src="<?= SystemURLs::getRootPath() ?>/skin/js/GroupEmailModal.js?v=<?= filemtime(SystemURLs::getDocumentRoot() . '/skin/js/GroupEmailModal.js') ?>"></script>
+<?php if (AuthenticationManager::getCurrentUser()->isEmailEnabled()): ?>
+<script src="<?= SystemURLs::assetVersioned('/skin/v2/email-composer.min.js') ?>" defer nonce="<?= SystemURLs::getCSPNonce() ?>"></script>
+<?php endif; ?>
 <?php
 require SystemURLs::getDocumentRoot() . '/Include/Footer.php';

@@ -7,6 +7,7 @@ use ChurchCRM\dto\SystemURLs;
 use ChurchCRM\model\ChurchCRM\EventQuery;
 use ChurchCRM\model\ChurchCRM\GroupQuery;
 use ChurchCRM\Service\PropertyService;
+use ChurchCRM\Utils\CSRFUtils;
 use ChurchCRM\Utils\InputUtils;
 use Propel\Runtime\ActiveQuery\Criteria;
 
@@ -106,10 +107,10 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
                     <i class="fa-solid fa-circle-dollar-to-slot me-1"></i><?= gettext("Finance") ?>
                 </button>
                 <div class="dropdown-menu">
-                    <a class="dropdown-item" href="<?= SystemURLs::getRootPath()?>/PledgeEditor.php?FamilyID=<?= $family->getId() ?>&amp;linkBack=people/family/<?= $family->getId() ?>&PledgeOrPayment=Pledge">
+                    <a class="dropdown-item" href="<?= SystemURLs::getRootPath()?>/finance/pledge/new?type=Pledge&familyId=<?= $family->getId() ?>">
                         <i class="fa-solid fa-hand-holding-dollar me-2"></i><?= gettext('Add Pledge') ?>
                     </a>
-                    <a class="dropdown-item" href="<?= SystemURLs::getRootPath()?>/PledgeEditor.php?FamilyID=<?= $family->getId() ?>&amp;linkBack=people/family/<?= $family->getId() ?>&PledgeOrPayment=Payment">
+                    <a class="dropdown-item" href="<?= SystemURLs::getRootPath()?>/finance/pledge/new?type=Payment&familyId=<?= $family->getId() ?>">
                         <i class="fa-solid fa-money-bill-wave me-2"></i><?= gettext('Add Payment') ?>
                     </a>
                 </div>
@@ -169,10 +170,14 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
                 <button class="btn btn-sm btn-ghost-secondary" data-bs-toggle="dropdown" data-bs-display="static"><i class="fa-solid fa-ellipsis-vertical"></i></button>
                 <div class="dropdown-menu dropdown-menu-end">
                     <a class="dropdown-item" href="<?= $person->getViewURI() ?>"><i class="fa-solid fa-eye me-2"></i><?= gettext('View') ?></a>
+                    <?php if (AuthenticationManager::getCurrentUser()->isEditRecordsEnabled()): ?>
                     <a class="dropdown-item" href="<?= SystemURLs::getRootPath() ?>/PersonEditor.php?PersonID=<?= $person->getID() ?>"><i class="fa-solid fa-pen me-2"></i><?= gettext('Edit') ?></a>
+                    <?php endif; ?>
                     <button class="dropdown-item AddToCart" data-cart-id="<?= $person->getId() ?>" data-cart-type="person"><i class="fa-solid fa-cart-plus me-2"></i><?= gettext('Add to Cart') ?></button>
+                    <?php if (AuthenticationManager::getCurrentUser()->isDeleteRecordsEnabled()): ?>
                     <div class="dropdown-divider"></div>
-                    <button class="dropdown-item text-danger delete-person" data-person_name="<?= $person->getFullName() ?>" data-person_id="<?= $person->getId() ?>" data-view="family"><i class="fa-solid fa-trash-can me-2"></i><?= gettext('Delete') ?></button>
+                    <button class="dropdown-item text-danger delete-person" data-person_name="<?= InputUtils::escapeAttribute($person->getFullName()) ?>" data-person_id="<?= $person->getId() ?>" data-view="family"><i class="fa-solid fa-trash-can me-2"></i><?= gettext('Delete') ?></button>
+                    <?php endif; ?>
                 </div>
             </div>
         <?php }
@@ -182,7 +187,7 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
             if (empty($members)) { return; } ?>
             <div class="mb-1">
                 <?php renderSectionHeader($label, $icon, $color, count($members)); ?>
-                <div class="table-responsive">
+                <div style="overflow-x: clip; overflow-y: visible;">
                     <table class="table table-vcenter card-table mb-0">
                         <thead>
                             <tr>
@@ -199,11 +204,11 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
                                     <td>
                                         <div class="d-flex align-items-center">
                                             <img data-image-entity-type="person" data-image-entity-id="<?= $person->getId() ?>" class="avatar avatar-sm me-2">
-                                            <a href="<?= $person->getViewURI() ?>"><?= $person->getTitle() ?> <?= $person->getFullName() ?></a>
+                                            <a href="<?= $person->getViewURI() ?>"><?= InputUtils::escapeHTML($person->getTitle()) ?> <?= InputUtils::escapeHTML($person->getFullName()) ?></a>
                                         </div>
                                     </td>
                                     <td class="text-center">
-                                        <span class="badge bg-secondary-lt text-secondary"><?= $person->getFamilyRoleName() ?></span>
+                                        <span class="badge bg-secondary-lt text-secondary"><?= InputUtils::escapeHTML($person->getFamilyRoleName()) ?></span>
                                     </td>
                                     <td><?= $person->getFormattedBirthDate() ?></td>
                                     <td>
@@ -256,7 +261,7 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
         ?>
             <div class="mb-1">
                 <?php renderSectionHeader($label, $icon, $color, count($members)); ?>
-                <div class="table-responsive">
+                <div style="overflow-x: clip; overflow-y: visible;">
                     <table class="table table-vcenter card-table mb-0">
                         <thead>
                             <tr>
@@ -275,7 +280,7 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
                                     <td>
                                         <div class="d-flex align-items-center">
                                             <img data-image-entity-type="person" data-image-entity-id="<?= $person->getId() ?>" class="avatar avatar-sm me-2">
-                                            <a href="<?= $person->getViewURI() ?>"><?= $person->getTitle() ?> <?= $person->getFullName() ?></a>
+                                            <a href="<?= $person->getViewURI() ?>"><?= InputUtils::escapeHTML($person->getTitle()) ?> <?= InputUtils::escapeHTML($person->getFullName()) ?></a>
                                         </div>
                                     </td>
                                     <td><?= $person->getFormattedBirthDate() ?></td>
@@ -310,7 +315,7 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
             <div class="card-header d-flex align-items-center">
                 <h3 class="card-title m-0"><i class="fa-solid fa-people-roof me-1"></i> <?= gettext("Family Members") ?></h3>
                 <span class="badge bg-primary-lt text-primary ms-2"><?= $memberCount ?></span>
-                <?php if (AuthenticationManager::getCurrentUser()->isEditRecordsEnabled()) { ?>
+                <?php if (AuthenticationManager::getCurrentUser()->isAddRecordsEnabled()) { ?>
                 <a class="btn btn-sm btn-outline-primary ms-auto" href="<?= SystemURLs::getRootPath() ?>/PersonEditor.php?FamilyID=<?= $family->getId() ?>">
                     <i class="fa-solid fa-user-plus me-1"></i><?= gettext('Add Member') ?>
                 </a>
@@ -422,7 +427,7 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
             </div>
             <div class="card-body">
                 <a href="https://maps.google.com/?q=<?= urlencode($familyAddress) ?>"
-                   target="_blank" rel="noopener noreferrer"><?= $familyAddress ?></a>
+                   target="_blank" rel="noopener noreferrer"><?= InputUtils::escapeHTML($familyAddress) ?></a>
                 <?php
                 $directionsUrl = $family->getDirectionsUrl();
                 $appleDirectionsUrl = $family->getAppleMapsDirectionsUrl();
@@ -431,7 +436,7 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
                     <?php if (!empty($directionsUrl) || !empty($appleDirectionsUrl)) : ?>
                     <div class="btn-group directions-btn-group">
                         <?php if (!empty($directionsUrl)) : ?>
-                        <a href="<?= $directionsUrl ?>" target="_blank" rel="noopener noreferrer"
+                        <a href="<?= InputUtils::escapeAttribute($directionsUrl) ?>" target="_blank" rel="noopener noreferrer"
                            class="btn btn-sm btn-outline-primary">
                             <i class="fa-solid fa-diamond-turn-right me-1"></i><?= gettext('Get Directions') ?>
                         </a>
@@ -444,11 +449,11 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
                         </button>
                         <div class="dropdown-menu directions-provider-menu d-none">
                             <?php if (!empty($directionsUrl)) : ?>
-                            <a class="dropdown-item" href="<?= $directionsUrl ?>" target="_blank" rel="noopener noreferrer">
+                            <a class="dropdown-item" href="<?= InputUtils::escapeAttribute($directionsUrl) ?>" target="_blank" rel="noopener noreferrer">
                                 <i class="fa-brands fa-google me-2"></i><?= gettext('Open in Google Maps') ?>
                             </a>
                             <?php endif; ?>
-                            <a class="dropdown-item apple-maps-option" href="<?= $appleDirectionsUrl ?>" target="_blank" rel="noopener noreferrer">
+                            <a class="dropdown-item apple-maps-option" href="<?= InputUtils::escapeAttribute($appleDirectionsUrl) ?>" target="_blank" rel="noopener noreferrer">
                                 <i class="fa-brands fa-apple me-2"></i><?= gettext('Open in Apple Maps') ?>
                             </a>
                         </div>
@@ -511,15 +516,15 @@ $canEditRecords = AuthenticationManager::getCurrentUser()->isEditRecordsEnabled(
                     <ul class="list-unstyled mb-0">
                         <?php foreach ($familyCustom as $customField) { ?>
                             <li class="mb-1">
-                                <i class="<?= $customField->getIcon() ?> me-2 text-body-secondary" style="width: 1rem; text-align: center;"></i><?= $customField->getDisplayValue() ?>:
+                                <i class="<?= InputUtils::escapeAttribute($customField->getIcon()) ?> me-2 text-body-secondary" style="width: 1rem; text-align: center;"></i><?= InputUtils::escapeHTML($customField->getDisplayValue()) ?>:
                                 <?php if ($customField->getLink()) { ?>
-                                    <a href="<?= $customField->getLink() ?>"><?= $customField->getFormattedValue() ?></a>
+                                    <a href="<?= InputUtils::escapeAttribute($customField->getLink()) ?>"><?= InputUtils::escapeHTML($customField->getFormattedValue()) ?></a>
                                 <?php } else {
                                     $val = $customField->getFormattedValue();
                                     if (strlen($val) > 40) { ?>
-                                        <span class="d-block text-body-secondary text-truncate" title="<?= InputUtils::escapeAttribute($val) ?>"><?= $val ?></span>
+                                        <span class="d-block text-body-secondary text-truncate" title="<?= InputUtils::escapeAttribute($val) ?>"><?= InputUtils::escapeHTML($val) ?></span>
                                     <?php } else { ?>
-                                        <span><?= $val ?></span>
+                                        <span><?= InputUtils::escapeHTML($val) ?></span>
                                     <?php }
                                 } ?>
                             </li>
@@ -628,7 +633,7 @@ if (AuthenticationManager::getCurrentUser()->isFinanceEnabled()) { ?>
                     </ul>
                 </div>
             </div>
-            <div class="table-responsive">
+            <div style="overflow-x: clip; overflow-y: visible;">
                 <table id="pledge-payment-v2-table" class="table table-vcenter card-table" style="width: 100%;">
                     <tbody></tbody>
                 </table>
@@ -760,6 +765,13 @@ if (AuthenticationManager::getCurrentUser()->isFinanceEnabled()) { ?>
 </script>
 <!-- Photos end -->
 
+
+<!-- Hidden form for CSRF-protected email PDF POST -->
+<form id="verifyEmailPDFForm" method="post" action="<?= SystemURLs::getRootPath() ?>/people/report/verify/email" class="d-none">
+    <?= CSRFUtils::getTokenInputField('people_report_verify_email') ?>
+    <input type="hidden" name="familyId" value="">
+</form>
+
 <div class="modal fade" id="confirm-verify" tabindex="-1" role="dialog" aria-labelledby="confirm-verify-label"
      aria-hidden="true">
     <div class="modal-dialog">
@@ -785,14 +797,18 @@ if (AuthenticationManager::getCurrentUser()->isFinanceEnabled()) { ?>
                         <?php
                     } ?>
             <div class="modal-footer text-center">
-                <?php if (count($familyEmails) > 0 && SystemConfig::isEmailEnabled()) {
+                <?php if (count($familyEmails) > 0) {
+                    $emailEnabled = SystemConfig::isEmailEnabled();
+                    $emailDisabledTitle = $emailEnabled ? '' : InputUtils::escapeAttribute(
+                        gettext('Email is not configured. Please configure SMTP settings in System Settings.')
+                    );
                     ?>
                     <button type="button" id="onlineVerify"
-                            class="btn btn-warning warning"><i
+                            class="btn btn-warning warning" <?php if (!$emailEnabled) echo 'disabled'; ?> title="<?= $emailDisabledTitle ?>"><i
                             class="fa-solid fa-envelope"></i><?= gettext("Online Verification") ?>
                     </button>
                     <button type="button" id="verifyEmailPDF"
-                            class="btn btn-warning"><i
+                            class="btn btn-warning" <?php if (!$emailEnabled) echo 'disabled'; ?> title="<?= $emailDisabledTitle ?>"><i
                             class="fa-solid fa-file-pdf"></i><?= gettext("Email PDF") ?>
                     </button>
                     <?php

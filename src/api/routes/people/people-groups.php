@@ -1,7 +1,6 @@
 <?php
 
 use ChurchCRM\Authentication\AuthenticationManager;
-use ChurchCRM\dto\ChurchMetaData;
 use ChurchCRM\dto\SystemConfig;
 use ChurchCRM\model\ChurchCRM\Base\ListOptionQuery;
 use ChurchCRM\model\ChurchCRM\EventAudienceQuery;
@@ -100,7 +99,7 @@ $app->group('/groups', function (RouteCollectorProxy $group): void {
         // Pre-fetch member counts per group
         $memberCounts = [];
         foreach (Person2group2roleP2g2rQuery::create()
-            ->withColumn('COUNT(*)', 'cnt')
+            ->addAsColumn('cnt', 'COUNT(*)')
             ->select(['GroupId', 'cnt'])
             ->groupByGroupId()
             ->find() as $row) {
@@ -436,67 +435,35 @@ $app->group('/groups', function (RouteCollectorProxy $group): void {
     /**
      * @OA\Get(
      *     path="/groups/{groupID}/emails",
-     *     summary="Get email addresses for group members (respects Do Not Email)",
+     *     summary="Get mailing email addresses for group members grouped by role",
+     *     description="Returns member email addresses for all group members, excluding those with the DoNotEmail property. sToEmailAddress is a system setting added by the composer, not returned here.",
      *     tags={"Groups"},
      *     security={{"ApiKeyAuth":{}}},
      *     @OA\Parameter(name="groupID", in="path", required=true, @OA\Schema(type="integer")),
-     *     @OA\Response(response=200, description="Email contact info for the group")
+     *     @OA\Response(response=200, description="Email addresses for the group",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="emails", type="array", @OA\Items(type="string"),
+     *                 description="All unique member email addresses (does not include sToEmailAddress)"),
+     *             @OA\Property(property="byRole", type="object",
+     *                 description="Emails grouped by group role name",
+     *                 @OA\AdditionalProperties(type="array", @OA\Items(type="string")))
+     *         )
+     *     ),
+     *     @OA\Response(response=401, description="Unauthorized"),
+     *     @OA\Response(response=403, description="Email permission required"),
+     *     @OA\Response(response=404, description="Group not found")
      * )
      */
     $group->get('/{groupID:[0-9]+}/emails', function (Request $request, Response $response, array $args): Response {
         try {
-            $groupID = (int) $args['groupID'];
-            $doNotEmailSet = _getExcludedPersonIdSet('iDoNotEmailPropertyId');
-
-            $memberships = Person2group2roleP2g2rQuery::create()
-                ->filterByGroupId($groupID)
-                ->innerJoinWithPerson()
-                ->find();
-
-            $group = $request->getAttribute('group');
-            $roleNameMap = [];
-            foreach (ListOptionQuery::create()->filterById($group->getRoleListId())->find() as $opt) {
-                $roleNameMap[(int) $opt->getOptionId()] = $opt->getOptionName();
-            }
-
-            $allEmails = [];
-            $roleEmails = [];
-            foreach ($memberships as $membership) {
-                $person = $membership->getPerson();
-                if ($person === null) {
-                    continue;
-                }
-                if (isset($doNotEmailSet[(int) $person->getId()])) {
-                    continue;
-                }
-                $email = (string) $person->getEmail();
-                if (empty($email) || isset($allEmails[$email])) {
-                    continue;
-                }
-                $allEmails[$email] = true;
-                $roleName = $roleNameMap[(int) $membership->getRoleId()] ?? gettext('Member');
-                $roleEmails[$roleName][] = $email;
-            }
-
-            $systemEmail = (string) SystemConfig::getValue('sToEmailAddress');
-            $allList = array_keys($allEmails);
-            if (!empty($systemEmail) && !isset($allEmails[$systemEmail])) {
-                $allList[] = $systemEmail;
-            }
-
-            $roles = [];
-            foreach ($roleEmails as $name => $emails) {
-                $roles[$name] = implode(',', $emails);
-            }
-
-            return SlimUtils::renderJSON($response, [
-                'all'       => implode(',', $allList),
-                'roles'     => $roles,
-            ]);
+            // GroupMiddleware already loaded and validated the Group — reuse it to avoid an extra DB query.
+            $groupEntity = $request->getAttribute('group');
+            $personService = new PersonService();
+            return SlimUtils::renderJSON($response, $personService->getGroupMailingEmails($groupEntity));
         } catch (\Throwable $e) {
             return SlimUtils::renderErrorJSON($response, gettext('Failed to retrieve email addresses'), [], 500, $e, $request);
         }
-    })->add(GroupMiddleware::class);
+    })->add(GroupMiddleware::class)->add(EmailRoleAuthMiddleware::class);
 
     /**
      * @OA\Get(
@@ -505,7 +472,10 @@ $app->group('/groups', function (RouteCollectorProxy $group): void {
      *     tags={"Groups"},
      *     security={{"ApiKeyAuth":{}}},
      *     @OA\Parameter(name="groupID", in="path", required=true, @OA\Schema(type="integer")),
-     *     @OA\Response(response=200, description="Email contact info segmented by role (teachers/parents/kids)")
+     *     @OA\Response(response=200, description="Email contact info segmented by role (teachers/parents/kids)"),
+     *     @OA\Response(response=401, description="Unauthorized"),
+     *     @OA\Response(response=403, description="Email permission required"),
+     *     @OA\Response(response=404, description="Group not found")
      * )
      */
     $group->get('/{groupID:[0-9]+}/sundayschool/emails', function (Request $request, Response $response, array $args): Response {
@@ -561,7 +531,23 @@ $app->group('/groups', function (RouteCollectorProxy $group): void {
             // Merge and dedup across segments for 'all'
             $allEmails = array_values(array_unique(array_merge($teacherEmails, $parentEmails, $kidEmails)));
 
+            // New array-shape response (used by email-composer modal)
+            $byRole = [];
+            if (!empty($teacherEmails)) {
+                $byRole[gettext('Teachers')] = $teacherEmails;
+            }
+            if (!empty($parentEmails)) {
+                $byRole[gettext('Parents')] = $parentEmails;
+            }
+            if (!empty($kidEmails)) {
+                $byRole[gettext('Kids')] = $kidEmails;
+            }
+
             return SlimUtils::renderJSON($response, [
+                // New canonical shape consumed by the email-composer modal
+                'emails' => $allEmails,
+                'byRole' => $byRole,
+                // Legacy CSV fields retained for backward compatibility
                 'all'      => implode(',', $allEmails),
                 'teachers' => implode(',', $teacherEmails),
                 'parents'  => implode(',', $parentEmails),
@@ -570,7 +556,7 @@ $app->group('/groups', function (RouteCollectorProxy $group): void {
         } catch (\Throwable $e) {
             return SlimUtils::renderErrorJSON($response, gettext('Failed to retrieve email addresses'), [], 500, $e, $request);
         }
-    })->add(GroupMiddleware::class);
+    })->add(GroupMiddleware::class)->add(EmailRoleAuthMiddleware::class);
 
     /**
      * @OA\Get(
@@ -1201,171 +1187,4 @@ $app->group('/groups', function (RouteCollectorProxy $group): void {
             throw new \Exception(gettext('invalid export value'));
         }
     })->add(GroupMiddleware::class);
-
-    /**
-     * @OA\Post(
-     *     path="/groups/{groupID}/send-email",
-     *     summary="Send an email to group members via the configured SMTP",
-     *     tags={"Groups"},
-     *     security={{"ApiKeyAuth":{}}},
-     *     @OA\Parameter(name="groupID", in="path", required=true, @OA\Schema(type="integer")),
-     *     @OA\RequestBody(
-     *         required=true,
-     *         @OA\JsonContent(
-     *             @OA\Property(property="to", type="string", description="Comma-separated recipient email addresses"),
-     *             @OA\Property(property="subject", type="string"),
-     *             @OA\Property(property="body", type="string")
-     *         )
-     *     ),
-     *     @OA\Response(response=200, description="Email sent successfully"),
-     *     @OA\Response(response=403, description="Permission denied or email not configured")
-     * )
-     */
-    $group->post('/{groupID:[0-9]+}/send-email', function (Request $request, Response $response, array $args): Response {
-        $input = (array) $request->getParsedBody();
-        $toRaw = $input['to'] ?? '';
-        $subject = trim($input['subject'] ?? '');
-        $body = trim($input['body'] ?? '');
-        $individual = !empty($input['individual']);
-
-        if (empty($toRaw)) {
-            return SlimUtils::renderErrorJSON($response, gettext('No recipient email addresses provided'), [], 400);
-        }
-        if (empty($subject) && empty($body)) {
-            return SlimUtils::renderErrorJSON($response, gettext('Subject and body cannot both be empty'), [], 400);
-        }
-
-        // Split on comma or semicolon (frontend normalizes, but be safe)
-        $toAddresses = array_filter(array_map('trim', preg_split('/[,;]/', $toRaw)), function ($email) {
-            return !empty($email) && filter_var($email, FILTER_VALIDATE_EMAIL);
-        });
-
-        if (empty($toAddresses)) {
-            return SlimUtils::renderErrorJSON($response, gettext('No valid email addresses provided'), [], 400);
-        }
-
-        if (!SystemConfig::isEmailEnabled()) {
-            return SlimUtils::renderErrorJSON($response, gettext('Email is not configured on this system'), [], 400);
-        }
-
-        try {
-            $mailerConfig = function () {
-                $m = new \PHPMailer\PHPMailer\PHPMailer();
-                $m->IsSMTP();
-                $m->CharSet = 'UTF-8';
-                $m->Timeout = SystemConfig::getIntValue('iSMTPTimeout');
-                $m->Host = SystemConfig::getValue('sSMTPHost');
-                $m->SMTPAutoTLS = SystemConfig::getBooleanValue('bPHPMailerAutoTLS');
-                $m->SMTPSecure = SystemConfig::getValue('sPHPMailerSMTPSecure');
-                if (SystemConfig::getBooleanValue('bSMTPAuth')) {
-                    $m->SMTPAuth = true;
-                    $m->Username = SystemConfig::getValue('sSMTPUser');
-                    $m->Password = SystemConfig::getValue('sSMTPPass');
-                }
-                $m->SMTPDebug = 0;
-                $m->setFrom(
-                    ChurchMetaData::getChurchEmail(),
-                    ChurchMetaData::getChurchName()
-                );
-                $currentUser = \ChurchCRM\Authentication\AuthenticationManager::getCurrentUser();
-                $userEmail = trim((string) $currentUser->getEmail());
-                if (!empty($userEmail)) {
-                    $m->addReplyTo($userEmail, $currentUser->getFullName());
-                }
-                return $m;
-            };
-
-            if ($individual) {
-                // Build email→name map from group members for placeholder replacement
-                $memberships = Person2group2roleP2g2rQuery::create()
-                    ->filterByGroupId((int) $args['groupID'])
-                    ->innerJoinWithPerson()
-                    ->find();
-                $emailNames = [];
-                foreach ($memberships as $membership) {
-                    $person = $membership->getPerson();
-                    if ($person === null) continue;
-                    $peEmail = strtolower(trim((string) $person->getEmail()));
-                    if (!empty($peEmail)) {
-                        $emailNames[$peEmail] = [
-                            'firstName' => $person->getFirstName(),
-                            'lastName'  => $person->getLastName(),
-                        ];
-                    }
-                }
-
-                // Send one email per recipient so each person receives it individually
-                $sentCount = 0;
-                $failCount = 0;
-                $failEmails = [];
-                foreach ($toAddresses as $email) {
-                    $mailer = $mailerConfig();
-                    $mailer->addAddress($email);
-
-                    // Replace placeholders with recipient's name (lowercase key lookups for robustness)
-                    $lookup = strtolower(trim($email));
-                    $firstName = $emailNames[$lookup]['firstName'] ?? '';
-                    $lastName  = $emailNames[$lookup]['lastName'] ?? '';
-                    $personalSubject = str_replace(
-                        ['{firstName}', '{lastName}'],
-                        [$firstName, $lastName],
-                        $subject
-                    );
-                    $personalBody = str_replace(
-                        ['{firstName}', '{lastName}'],
-                        [$firstName, $lastName],
-                        $body
-                    );
-
-                    $mailer->Subject = $personalSubject;
-                    $mailer->Body = nl2br($personalBody);
-                    $mailer->AltBody = $personalBody;
-                    $mailer->isHTML(true);
-                    if ($mailer->send()) {
-                        $sentCount++;
-                    } else {
-                        $failCount++;
-                        $failEmails[] = $email;
-                    }
-                }
-                if ($sentCount > 0) {
-                    $msg = sprintf(gettext('Email sent to %d of %d recipients'), $sentCount, count($toAddresses));
-                    if ($failCount > 0) {
-                        $msg .= ' ' . sprintf(gettext('(%d failed)'), $failCount);
-                    }
-                    return SlimUtils::renderJSON($response, [
-                        'success' => true,
-                        'message' => $msg,
-                        'sentCount' => $sentCount,
-                        'failCount' => $failCount,
-                        'failEmails' => $failEmails,
-                    ]);
-                }
-                return SlimUtils::renderErrorJSON($response, gettext('Failed to send any emails'), [], 500);
-            }
-
-            // Default: single email to all recipients
-            $phpMailer = $mailerConfig();
-            foreach ($toAddresses as $email) {
-                $phpMailer->addAddress($email);
-            }
-            $phpMailer->Subject = $subject;
-            $phpMailer->Body = nl2br($body);
-            $phpMailer->AltBody = $body;
-            $phpMailer->isHTML(true);
-
-            if ($phpMailer->send()) {
-                return SlimUtils::renderJSON($response, [
-                    'success' => true,
-                    'message' => gettext('Email sent successfully'),
-                    'recipientCount' => count($toAddresses),
-                ]);
-            }
-
-            return SlimUtils::renderErrorJSON($response, $phpMailer->ErrorInfo, [], 500);
-        } catch (\Throwable $e) {
-            return SlimUtils::renderErrorJSON($response, gettext('Failed to send email'), [], 500, $e, $request);
-        }
-    })->add(GroupMiddleware::class)
-      ->add(EmailRoleAuthMiddleware::class);
 })->add(ManageGroupRoleAuthMiddleware::class);

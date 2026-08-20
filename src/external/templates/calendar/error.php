@@ -15,6 +15,10 @@ $rootPath = SystemURLs::getRootPath();
 $churchName = ChurchMetaData::getChurchName();
 $logoURL = ChurchMetaData::getChurchLogoURL();
 
+// Allow external-calendar error pages to be embedded in a third-party <iframe>.
+// See src/Include/Header-Security.php for the opt-in mechanism.
+$allowFraming = true;
+
 require SystemURLs::getDocumentRoot() . '/Include/HeaderNotLoggedIn.php';
 ?>
 
@@ -42,7 +46,7 @@ require SystemURLs::getDocumentRoot() . '/Include/HeaderNotLoggedIn.php';
           <?= InputUtils::escapeHTML($message) ?>
         </p>
         <a href="<?= InputUtils::escapeAttribute($rootPath) ?>/" class="btn btn-primary">
-          <i class="ti ti-home me-1"></i><?= gettext('Go to home') ?>
+          <i class="fa-solid fa-house me-1"></i><?= gettext('Go to home') ?>
         </a>
       </div>
     </div>

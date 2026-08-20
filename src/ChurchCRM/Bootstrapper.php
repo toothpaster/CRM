@@ -118,15 +118,6 @@ class Bootstrapper
             SystemConfig::init(ConfigQuery::create()->find());
         }
 
-        // Auto-generate a stable anonymous installation UUID on first boot.
-        // A very narrow race window exists if two requests arrive simultaneously
-        // on a brand-new install, but the last writer wins in the DB and every
-        // subsequent request reads the persisted value — identical to the
-        // sTwoFASecretKey auto-generation pattern in LoadConfigs.php.
-        if (empty(SystemConfig::getValue('sSystemID'))) {
-            SystemConfig::setValue('sSystemID', Uuid::uuid4()->toString());
-        }
-        
         self::configureLogging();
         self::configureUserEnvironment();
         self::configureLocale();
@@ -169,8 +160,21 @@ class Bootstrapper
                 }
             }
         }
+
+        // Auto-generate a stable anonymous installation UUID on first boot.
+        // A very narrow race window exists if two requests arrive simultaneously
+        // on a brand-new install, but the last writer wins in the DB and every
+        // subsequent request reads the persisted value — identical to the
+        // sTwoFASecretKey auto-generation pattern in LoadConfigs.php.
+        // Runs AFTER the DB-upgrade check above: writing to config_cfg before the
+        // schema is current fatals when a restored/older database's config_cfg is
+        // missing a column default the current Propel model expects on INSERT.
+        if (empty(SystemConfig::getValue('sSystemID'))) {
+            SystemConfig::setValue('sSystemID', Uuid::uuid4()->toString());
+        }
+
         LoggerUtils::resetAppLoggerLevel();
-        
+
         // Mark as initialized
         self::$initialized = true;
     }
@@ -345,9 +349,15 @@ class Bootstrapper
         self::$bootStrapLogger->debug("Initializing MySQLi to " . self::$databaseServerName . " as " . self::$databaseUser);
         // Due to mysqli handling connections on 'localhost' via socket only, we need to tease out this case and handle
         // TCP/IP connections separately defaulting self::$databasePort to 3306 for the general case when self::$databasePort is not set.
+        //
+        // The 'p:' prefix makes the connection persistent (connection pooling). This is required on
+        // Hostinger shared hosting: they enforce a per-account limit of 20 NEW MySQL connections per
+        // second, and a fresh non-persistent connection on every request exceeds that during traffic
+        // bursts, producing "Operation not permitted" (SQLSTATE [HY000] [2002]) 500 errors.
+        // See https://www.hostinger.com/support/how-to-fix-mysql-operation-not-permitted-error/
         if (self::$databaseServerName === self::LOCALHOST_IDENTIFIER) {
             self::$bootStrapLogger->debug("Connecting to localhost with no port");
-            $cnInfoCentral = mysqli_connect(self::$databaseServerName, self::$databaseUser, self::$databasePassword);
+            $cnInfoCentral = mysqli_connect('p:' . self::$databaseServerName, self::$databaseUser, self::$databasePassword);
         } else {
             if (!isset(self::$databasePort)) {
                 self::$bootStrapLogger->debug("MySQL connection did not specify a port. Using " . self::DEFAULT_MYSQL_PORT . " as default");
@@ -357,7 +367,7 @@ class Bootstrapper
             // We specify the database name in a different call, ie 'mysqli_select_db()' just below here
             self::$bootStrapLogger->debug("Connecting to " . self::$databaseServerName . " on port " . self::$databasePort . " as " . self::$databaseUser);
             try {
-                $cnInfoCentral = mysqli_connect(self::$databaseServerName, self::$databaseUser, self::$databasePassword, null, self::$databasePort);
+                $cnInfoCentral = mysqli_connect('p:' . self::$databaseServerName, self::$databaseUser, self::$databasePassword, null, self::$databasePort);
             } catch (\Exception $e) {
                 self::handleBootstrapFailure($e, 'Database connection failed');
             }
@@ -544,6 +554,13 @@ class Bootstrapper
             'dsn' => Bootstrapper::getDSN(),
             'user' => self::$databaseUser,
             'password' => self::$databasePassword,
+            // Persistent PDO connection: paired with the 'p:' mysqli prefix in initMySQLI(), this
+            // keeps the connection pool warm instead of opening 2 fresh MySQL connections on every
+            // request. Required on Hostinger shared hosting to stay under their 20 new
+            // connections/second per-account limit ("Operation not permitted" 500 errors).
+            'options' => [
+                'ATTR_PERSISTENT' => true,
+            ],
             'settings' => [
                 'charset' => self::DEFAULT_CHARSET,
                 'queries' => ["SET sql_mode=(SELECT REPLACE(REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''),'NO_ZERO_DATE',''))"],

@@ -39,6 +39,34 @@ class CustomFieldUtils
     /**
      * Formats custom field data for display-only (read-only) output.
      * Migrated from displayCustomField() in Functions.php.
+     *
+     * **Security contract (issue #9199 audit):**
+     * Returns PLAIN, unescaped text for every supported type_ID. No case
+     * produces HTML markup:
+     *
+     *  type 1  (True/False)        → gettext('Yes') / gettext('No') / '' (empty when data is unset)
+     *  type 2  (Date)              → DateTimeUtils::formatDate() — plain text
+     *  type 3  (Text 50 char)      → raw $data
+     *  type 4  (Text 100 char)     → raw $data
+     *  type 5  (Text long)         → raw $data
+     *  type 6  (Year)              → raw $data
+     *  type 7  (Season)            → ucfirst($data) — plain text
+     *  type 8  (Number)            → raw $data
+     *  type 9  (Person from Group) → Person::getFullName() — plain text
+     *  type 10 (Money)             → raw $data
+     *  type 11 (Phone)             → raw $data
+     *  type 12 (Custom Drop-Down)  → ListOption::getOptionName() — plain text
+     *  default                     → gettext('Invalid Editor ID!')
+     *
+     * **Output encoding is deliberately kept at each call site**, not here,
+     * because the same method feeds multiple output contexts:
+     *   - HTML views        → InputUtils::escapeHTML()  (required)
+     *   - HTML attributes   → InputUtils::escapeAttribute()  (required)
+     *   - CSV rows          → no HTML escaping (CSVCreateFile.php)
+     *   - PDF (TCPDF)       → no HTML escaping (PdfDirectory.php)
+     *   - Plain-text reports → no escaping (GroupReport.php)
+     *
+     * HTML/browser-context callers MUST escape the return value.
      */
     public static function display($type, ?string $data, $special)
     {
@@ -49,7 +77,7 @@ class CustomFieldUtils
                 } elseif ($data === 'false') {
                     return gettext('No');
                 }
-                break;
+                return '';
 
             case 2:
                 return DateTimeUtils::formatDate($data);
@@ -73,9 +101,17 @@ class CustomFieldUtils
                     return '';
                 }
 
-                $person = PersonQuery::create()->findPk($personId);
+                // Static memoization: the People List calls display() for every person
+                // row, so the same type-9 value (a person ID) may be looked up N times
+                // per request. Cache the resolved full name to collapse those lookups
+                // into at most one SELECT per unique person ID.
+                static $personNameCache = [];
+                if (!array_key_exists($personId, $personNameCache)) {
+                    $person = PersonQuery::create()->findPk($personId);
+                    $personNameCache[$personId] = $person ? $person->getFullName() : '';
+                }
 
-                return $person ? $person->getFullName() : '';
+                return $personNameCache[$personId];
 
             case 11:
                 return $data;
@@ -86,12 +122,21 @@ class CustomFieldUtils
                     return '';
                 }
 
-                $option = ListOptionQuery::create()
-                    ->filterById((int) $special)
-                    ->filterByOptionId($optionId)
-                    ->findOne();
+                // Static memoization: filterBy* does not use Propel's InstancePool,
+                // so without caching the same (listId, optionId) pair would hit the
+                // DB once per row per field. Cache the option name string to collapse
+                // N×M queries into at most K (unique list+option combinations).
+                static $optionNameCache = [];
+                $cacheKey = ((int) $special) . ':' . $optionId;
+                if (!array_key_exists($cacheKey, $optionNameCache)) {
+                    $option = ListOptionQuery::create()
+                        ->filterById((int) $special)
+                        ->filterByOptionId($optionId)
+                        ->findOne();
+                    $optionNameCache[$cacheKey] = $option ? $option->getOptionName() : '';
+                }
 
-                return $option ? $option->getOptionName() : '';
+                return $optionNameCache[$cacheKey];
 
             default:
                 return gettext('Invalid Editor ID!');
@@ -201,7 +246,7 @@ class CustomFieldUtils
 
                 foreach ($groupPeople as $p2g2r) {
                     $person = $p2g2r->getPerson();
-                    echo '<option value="' . $person->getId() . '"' . ($data == $person->getId() ? ' selected' : '') . '>' . $person->getFullName() . '</option>';
+                    echo '<option value="' . $person->getId() . '"' . ($data == $person->getId() ? ' selected' : '') . '>' . InputUtils::escapeHTML($person->getFullName()) . '</option>';
                 }
 
                 echo '</select></div>';
@@ -321,6 +366,12 @@ class CustomFieldUtils
                         $bErrorFlag = true;
                     }
                 }
+                break;
+
+            case 11:
+                // Phone field: strip any character that is not valid in a phone number
+                // or a tel: URI to prevent storage of XSS payloads (GHSA-frj8-mpcx-44g9).
+                $data = preg_replace('/[^0-9+\-().\sxX#*]/', '', $data);
                 break;
 
             default:

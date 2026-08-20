@@ -21,6 +21,20 @@ window.CRM.escapeHtml = (text) => {
   div.textContent = text;
   return div.innerHTML;
 };
+/**
+ * Escape text for safe insertion into HTML attribute values (e.g. title="...", value="...").
+ * Extends escapeHtml to also encode double and single quotes so attackers cannot
+ * break out of a quoted attribute context.
+ * GHSA-369j-c5w2-48m4: attribute-context escaping for dashboard DataTables render callbacks
+ * @param {string} text - The text to escape
+ * @returns {string} - Text safe for use inside HTML attribute values
+ */
+window.CRM.escapeAttribute = (text) => {
+  if (text === null || text === undefined) {
+    return "";
+  }
+  return window.CRM.escapeHtml(text).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+};
 
 window.CRM.APIRequest = (options) => {
   // Guard against jQuery not being available
@@ -149,164 +163,293 @@ window.CRM.groups = {
     Role: 2,
   },
   promptSelection: (selectOptions, selectionCallback) => {
-    const options = {
-      message:
-        '<div class="modal-body">\
-                  <input type="hidden" id="targetGroupAction">',
-      buttons: {
-        cancel: {
-          label: i18next.t("Cancel"),
-          className: "btn-ghost-secondary",
-        },
-        confirm: {
-          label: i18next.t("OK"),
-          className: "btn-primary",
-        },
-      },
-    };
-    let initFunction = () => {};
+    // Determine the dialog title based on what the caller wants to select
+    const isGroupAndRole =
+      selectOptions.Type === (window.CRM.groups.selectTypes.Group | window.CRM.groups.selectTypes.Role);
+    const isGroupOnly = selectOptions.Type === window.CRM.groups.selectTypes.Group;
+    const isRoleOnly = selectOptions.Type === window.CRM.groups.selectTypes.Role;
 
-    // Read a value from a TomSelect-wrapped (or plain) select. TomSelect does
-    // not always mirror its current selection back onto the underlying
-    // <option selected> attribute, so `option:selected` is unreliable here —
-    // always prefer the TomSelect instance API when available. Returns "" if
-    // nothing is selected.
-    const readSelectValue = (id) => {
-      const el = document.getElementById(id);
-      if (!el) return "";
-      if (el.tomselect) {
-        const v = el.tomselect.getValue();
-        return v == null ? "" : String(v);
+    if (isRoleOnly && !selectOptions.GroupID) {
+      console.error("[CRM.groups.promptSelection] GroupID is required for role-only selection");
+      return;
+    }
+
+    // Build a unique modal ID so multiple calls don't conflict
+    const modalId = "crm-group-select-modal-" + Date.now();
+
+    // Build the modal body HTML
+    let bodyHtml = "";
+    if (isGroupOnly || isGroupAndRole) {
+      bodyHtml +=
+        '<div class="mb-3">' +
+        '<label class="form-label fw-semibold">' +
+        i18next.t("Select Group") +
+        "</label>" +
+        '<select id="crm-gs-group" class="form-select"></select>' +
+        "</div>";
+    }
+    if (isRoleOnly || isGroupAndRole) {
+      bodyHtml +=
+        '<div class="mb-3' +
+        (isGroupAndRole ? " d-none" : "") +
+        '" id="crm-gs-role-wrapper">' +
+        '<label class="form-label fw-semibold">' +
+        i18next.t("Select Role") +
+        "</label>" +
+        '<select id="crm-gs-role" class="form-select"></select>' +
+        "</div>";
+    }
+
+    // Determine dialog title
+    let modalTitle = i18next.t("Select Group");
+    if (isRoleOnly) modalTitle = i18next.t("Select Role");
+    if (isGroupAndRole) modalTitle = i18next.t("Select Group and Role");
+
+    // Create a Bootstrap 5 modal programmatically
+    // (avoids bootbox v6 / TomSelect incompatibilities with .init() and dropdownParent)
+    const existing = document.getElementById(modalId);
+    if (existing) existing.remove();
+
+    const wrapper = document.createElement("div");
+    wrapper.id = modalId;
+    wrapper.className = "modal fade";
+    wrapper.setAttribute("tabindex", "-1");
+    wrapper.setAttribute("aria-modal", "true");
+    wrapper.setAttribute("role", "dialog");
+    wrapper.innerHTML =
+      '<div class="modal-dialog modal-dialog-centered">' +
+      '<div class="modal-content">' +
+      '<div class="modal-header">' +
+      '<h5 class="modal-title">' +
+      window.CRM.escapeHtml(modalTitle) +
+      "</h5>" +
+      '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="' +
+      i18next.t("Cancel") +
+      '"></button>' +
+      "</div>" +
+      '<div class="modal-body">' +
+      bodyHtml +
+      "</div>" +
+      '<div class="modal-footer">' +
+      '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="crm-gs-cancel">' +
+      i18next.t("Cancel") +
+      "</button>" +
+      '<button type="button" class="btn btn-primary" id="crm-gs-confirm" disabled>' +
+      i18next.t("OK") +
+      "</button>" +
+      "</div>" +
+      "</div></div>";
+
+    document.body.appendChild(wrapper);
+    const bsModal = new window.bootstrap.Modal(wrapper, { backdrop: "static" });
+
+    // Clean up DOM when the modal is fully hidden
+    const cleanup = () => {
+      try {
+        if (groupSelectInstance) {
+          groupSelectInstance.destroy();
+          groupSelectInstance = null;
+        }
+        if (roleSelectInstance) {
+          roleSelectInstance.destroy();
+          roleSelectInstance = null;
+        }
+      } catch (err) {
+        console.error("[promptSelection] Error destroying TomSelect instances:", err);
       }
-      const jqVal = window.jQuery(el).val();
-      return jqVal == null ? "" : String(jqVal);
+      try {
+        bsModal.dispose();
+      } catch (err) {
+        console.error("[promptSelection] Error disposing modal:", err);
+      }
+      // Always remove the wrapper, even if cleanup fails
+      if (wrapper.parentNode) {
+        wrapper.remove();
+      }
     };
 
-    if (selectOptions.Type & window.CRM.groups.selectTypes.Group) {
-      options.title = i18next.t("Select Group");
-      options.message +=
-        "<span>" +
-        i18next.t("Please select target group for members") +
-        ':</span>\
-                  <select name="targetGroupSelection" id="targetGroupSelection" class="form-control"></select>';
-      options.buttons.confirm.callback = () => {
-        const groupId = readSelectValue("targetGroupSelection");
-        if (!groupId) {
-          bootbox.alert(i18next.t("Please select a group."));
-          return false;
-        }
-        selectionCallback({ GroupID: groupId });
-      };
-    }
-    if (selectOptions.Type & window.CRM.groups.selectTypes.Role) {
-      options.title = i18next.t("Select Role");
-      options.message +=
-        '<span style="margin-top: 1rem; display: block;">' +
-        i18next.t("Please select target Role for members") +
-        ':</span>\
-                  <select name="targetRoleSelection" id="targetRoleSelection" class="form-control"></select>';
-      options.buttons.confirm.callback = () => {
-        const roleId = readSelectValue("targetRoleSelection");
-        if (!roleId) {
-          bootbox.alert(i18next.t("Please select a role."));
-          return false;
-        }
-        selectionCallback({ RoleID: roleId });
-      };
-    }
+    wrapper.addEventListener("hidden.bs.modal", cleanup, { once: true });
 
-    if (selectOptions.Type === window.CRM.groups.selectTypes.Role) {
-      if (!selectOptions.GroupID) {
-        throw i18next.t("GroupID required for role selection prompt");
+    // Fallback timeout: ensure cleanup happens if hidden.bs.modal doesn't fire
+    setTimeout(() => {
+      if (wrapper.parentNode) {
+        cleanup();
       }
-      initFunction = () => {
-        // Remove tabindex from bootbox so TomSelect dropdown can receive focus
-        window.jQuery(".bootbox").removeAttr("tabindex");
-        window.CRM.groups.getRoles(selectOptions.GroupID).done((rdata) => {
-          const roleEl = document.getElementById("targetRoleSelection");
-          if (roleEl && roleEl.tomselect) roleEl.tomselect.destroy();
-          new TomSelect(roleEl, {
-            valueField: "id",
-            labelField: "text",
-            searchField: "text",
-            options: rdata.map((item) => ({
-              // i18next-disable-next-line
-              text: i18next.t(item.OptionName),
-              id: String(item.OptionId),
-            })),
-          });
-        });
-      };
-    }
-    if (selectOptions.Type === (window.CRM.groups.selectTypes.Group | window.CRM.groups.selectTypes.Role)) {
-      options.title = i18next.t("Select Group and Role");
-      options.buttons.confirm.callback = () => {
-        const groupId = readSelectValue("targetGroupSelection");
-        const roleId = readSelectValue("targetRoleSelection");
-        if (!groupId || !roleId) {
-          bootbox.alert(i18next.t("Please select both a group and a role."));
-          return false;
-        }
-        selectionCallback({ GroupID: groupId, RoleID: roleId });
-      };
-    }
-    options.message += "</div>";
-    const dialog = bootbox.dialog(options);
-    // Bootbox 6 returns a jQuery element — use the shown.bs.modal
-    // event to run the init function instead of a non-existent .init() API.
-    if (typeof initFunction === "function") {
-      dialog.on("shown.bs.modal", initFunction);
-    }
+    }, 2000);
 
-    // Ensure TomSelect dropdowns render above the Bootstrap modal backdrop
-    // even when appended to document.body (no dropdownParent set).
-    if (!document.getElementById("ts-zindex-fix")) {
-      var style = document.createElement("style");
-      style.id = "ts-zindex-fix";
-      style.textContent =
-        ".ts-dropdown { z-index: 1060 !important; }" +
-        ".ts-dropdown .option { background-color: var(--tblr-card-bg, #fff); }";
-      document.head.appendChild(style);
-    }
+    const confirmBtn = wrapper.querySelector("#crm-gs-confirm");
+    const roleWrapper = wrapper.querySelector("#crm-gs-role-wrapper");
 
-    window.CRM.groups.get().done((rdata) => {
-      const groupsList = rdata.map((item) => ({
-        text: item.Name,
-        id: String(item.Id),
-      }));
-      window.jQuery("#targetGroupSelection").parents(".bootbox").removeAttr("tabindex");
-      const groupEl = document.getElementById("targetGroupSelection");
-      if (groupEl && groupEl.tomselect) groupEl.tomselect.destroy();
-      new TomSelect(groupEl, {
-        valueField: "id",
-        labelField: "text",
-        searchField: "text",
-        placeholder: i18next.t("Search groups..."),
-        items: [],
-        options: groupsList,
-        onChange: (value) => {
-          if (!value) return;
-          const roleEl = document.getElementById("targetRoleSelection");
-          if (roleEl && roleEl.tomselect) roleEl.tomselect.destroy();
-          // Clear existing options
-          while (roleEl && roleEl.options.length) roleEl.remove(0);
-          window.CRM.groups.getRoles(value).done((rdata) => {
-            const rolesList = rdata.map((item) => ({
-              // i18next-disable-next-line
-              text: i18next.t(item.OptionName),
-              id: String(item.OptionId),
+    let selectedGroupId = null;
+    let selectedRoleId = null;
+    let groupSelectInstance = null;
+    let roleSelectInstance = null;
+    let noRolesAvailable = false;
+
+    // Helper: enable/disable the confirm button based on current selection state
+    const updateConfirmState = () => {
+      if (isGroupOnly) {
+        confirmBtn.disabled = !selectedGroupId;
+      } else if (isRoleOnly) {
+        confirmBtn.disabled = !selectedRoleId;
+      } else {
+        // Group + Role: require a group; role is optional if the group has no roles
+        confirmBtn.disabled = !selectedGroupId;
+      }
+    };
+
+    // Initialize TomSelect controls once the modal is fully visible.
+    // shown.bs.modal fires after the CSS transition so elements are measured correctly.
+    wrapper.addEventListener(
+      "shown.bs.modal",
+      () => {
+        if (isGroupOnly || isGroupAndRole) {
+          const groupEl = wrapper.querySelector("#crm-gs-group");
+
+          // Fetch all groups and populate the TomSelect
+          window.CRM.groups.get().done((rdata) => {
+            const groupOptions = rdata.map((item) => ({
+              text: item.Name,
+              id: String(item.Id),
             }));
-            new TomSelect(roleEl, {
+
+            groupSelectInstance = new TomSelect(groupEl, {
               valueField: "id",
               labelField: "text",
               searchField: "text",
-              placeholder: i18next.t("Select a role"),
-              options: rolesList,
+              options: groupOptions,
+              placeholder: i18next.t("Search groups..."),
+              items: [],
+              dropdownParent: "body",
+              onChange: (value) => {
+                selectedGroupId = value || null;
+                updateConfirmState();
+
+                if (!isGroupAndRole) return;
+
+                // Disable confirm while roles are loading to prevent premature submit
+                confirmBtn.disabled = true;
+
+                // When the user selects a group, load its roles
+                const roleEl = wrapper.querySelector("#crm-gs-role");
+                if (roleEl && roleEl.tomselect) {
+                  roleEl.tomselect.destroy();
+                  roleSelectInstance = null;
+                }
+                selectedRoleId = null;
+
+                if (!value) {
+                  if (roleWrapper) roleWrapper.classList.add("d-none");
+                  return;
+                }
+
+                window.CRM.groups.getRoles(value).done((roles) => {
+                  if (!roles || roles.length === 0) {
+                    // Group has no roles — hide the role picker and allow confirm
+                    if (roleWrapper) roleWrapper.classList.add("d-none");
+                    confirmBtn.disabled = false;
+                    return;
+                  }
+
+                  // Auto-select the only role when there is exactly one
+                  if (roles.length === 1) {
+                    selectedRoleId = String(roles[0].OptionId);
+                    if (roleWrapper) roleWrapper.classList.add("d-none");
+                    confirmBtn.disabled = false;
+                    return;
+                  }
+
+                  // Multiple roles — show the role picker
+                  if (roleWrapper) roleWrapper.classList.remove("d-none");
+
+                  const roleOptions = roles.map((r) => ({
+                    // i18next-disable-next-line
+                    text: i18next.t(r.OptionName),
+                    id: String(r.OptionId),
+                  }));
+                  selectedRoleId = roleOptions[0].id; // default to first role
+                  roleSelectInstance = new TomSelect(roleEl, {
+                    valueField: "id",
+                    labelField: "text",
+                    searchField: "text",
+                    options: roleOptions,
+                    items: [selectedRoleId],
+                    dropdownParent: "body",
+                    onChange: (v) => {
+                      selectedRoleId = v || null;
+                      updateConfirmState();
+                    },
+                  });
+                  confirmBtn.disabled = false;
+                });
+              },
             });
           });
-        },
-      });
+        }
+
+        if (isRoleOnly) {
+          // Role-only: load roles for the pre-supplied GroupID
+          const roleEl = wrapper.querySelector("#crm-gs-role");
+          window.CRM.groups.getRoles(selectOptions.GroupID).done((roles) => {
+            if (!roles || roles.length === 0) {
+              // No roles configured — allow proceed; caller receives RoleID: null
+              noRolesAvailable = true;
+              confirmBtn.disabled = false;
+              return;
+            }
+            const roleOptions = roles.map((r) => ({
+              // i18next-disable-next-line
+              text: i18next.t(r.OptionName),
+              id: String(r.OptionId),
+            }));
+            selectedRoleId = roleOptions[0].id;
+            roleSelectInstance = new TomSelect(roleEl, {
+              valueField: "id",
+              labelField: "text",
+              searchField: "text",
+              options: roleOptions,
+              items: [selectedRoleId],
+              dropdownParent: "body",
+              onChange: (v) => {
+                selectedRoleId = v || null;
+                updateConfirmState();
+              },
+            });
+            confirmBtn.disabled = false;
+          });
+        }
+      },
+      { once: true },
+    );
+
+    // Confirm button handler
+    confirmBtn.addEventListener("click", () => {
+      if (isGroupOnly) {
+        if (!selectedGroupId) {
+          window.CRM.notify(i18next.t("Please select a group."), { type: "warning", delay: 3000 });
+          return;
+        }
+        bsModal.hide();
+        selectionCallback({ GroupID: selectedGroupId });
+      } else if (isRoleOnly) {
+        if (!selectedRoleId && !noRolesAvailable) {
+          window.CRM.notify(i18next.t("Please select a role."), { type: "warning", delay: 3000 });
+          return;
+        }
+        bsModal.hide();
+        selectionCallback({ RoleID: selectedRoleId });
+      } else {
+        // Group + Role
+        if (!selectedGroupId) {
+          window.CRM.notify(i18next.t("Please select a group."), { type: "warning", delay: 3000 });
+          return;
+        }
+        bsModal.hide();
+        selectionCallback({ GroupID: selectedGroupId, RoleID: selectedRoleId });
+      }
     });
+
+    bsModal.show();
   },
   addPerson: (GroupID, PersonID, RoleID) => {
     const params = {
@@ -411,6 +554,37 @@ window.CRM.dashboard = {
       document.getElementById("EventsNumber").innerText = data.Events;
     });
   },
+
+  /**
+   * Load open deposit count once on page load
+   * Used by Finance menu badge to show real-time count of open deposits
+   */
+  loadOpenDepositCount: () => {
+    const el = document.getElementById("openDeposits");
+    if (!el) return; // Finance menu not present for this user
+    window.CRM.APIRequest({
+      method: "GET",
+      path: "deposits/open-count",
+      suppressErrorDialog: true,
+    }).done((data) => {
+      el.innerText = data.count;
+    });
+  },
+
+  /**
+   * Load active fundraiser count once on page load for menu badge.
+   * Replaces session-cached count, ensuring always fresh data.
+   */
+  loadFundraiserCount: () => {
+    window.CRM.APIRequest({
+      method: "GET",
+      path: "fundraisers/active-count",
+      suppressErrorDialog: true,
+    }).done((data) => {
+      const el = document.getElementById("activeFundraisers");
+      if (el) el.innerText = data.count;
+    });
+  },
 };
 
 /**
@@ -427,21 +601,22 @@ window.CRM.renderPersonActionMenu = (personId, personName, options) => {
   const inCart = options.inCart || false;
   const familyId = options.familyId || null;
   const root = window.CRM.root;
-  const escapedName = window.CRM.escapeHtml(personName || "");
+  // GHSA-hm7v-jrhm-fmfx: use escapeAttribute (encodes quotes) for data-* attribute context
+  const escapedName = window.CRM.escapeAttribute(personName || "");
   const familyItem = familyId
     ? '<a class="dropdown-item" href="' +
       root +
       "/people/family/" +
       familyId +
       '">' +
-      '<i class="ti ti-users me-2"></i>' +
+      '<i class="fa-solid fa-users me-2"></i>' +
       i18next.t("View Family") +
       "</a>"
     : "";
   return (
     '<div class="dropdown">' +
     '<button class="btn btn-sm btn-ghost-secondary" type="button" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">' +
-    '<i class="ti ti-dots-vertical"></i>' +
+    '<i class="fa-solid fa-ellipsis-vertical"></i>' +
     "</button>" +
     '<div class="dropdown-menu dropdown-menu-end">' +
     '<a class="dropdown-item" href="' +
@@ -449,17 +624,19 @@ window.CRM.renderPersonActionMenu = (personId, personName, options) => {
     "/people/view/" +
     personId +
     '">' +
-    '<i class="ti ti-eye me-2"></i>' +
+    '<i class="fa-solid fa-eye me-2"></i>' +
     i18next.t("View") +
     "</a>" +
-    '<a class="dropdown-item" href="' +
-    root +
-    "/PersonEditor.php?PersonID=" +
-    personId +
-    '">' +
-    '<i class="ti ti-pencil me-2"></i>' +
-    i18next.t("Edit") +
-    "</a>" +
+    (window.CRM.permissions && window.CRM.permissions.editRecords
+      ? '<a class="dropdown-item" href="' +
+        root +
+        "/PersonEditor.php?PersonID=" +
+        personId +
+        '">' +
+        '<i class="fa-solid fa-pencil me-2"></i>' +
+        i18next.t("Edit") +
+        "</a>"
+      : "") +
     familyItem +
     '<div class="dropdown-divider"></div>' +
     '<button class="dropdown-item ' +
@@ -474,7 +651,7 @@ window.CRM.renderPersonActionMenu = (personId, personName, options) => {
     i18next.t("Remove from Cart") +
     '">' +
     '<i class="' +
-    (inCart ? "ti ti-shopping-cart-off" : "ti ti-shopping-cart-plus") +
+    (inCart ? "fa-solid fa-box-open" : "fa-solid fa-cart-shopping") +
     ' me-2"></i>' +
     '<span class="cart-label">' +
     (inCart ? i18next.t("Remove from Cart") : i18next.t("Add to Cart")) +
@@ -487,7 +664,7 @@ window.CRM.renderPersonActionMenu = (personId, personName, options) => {
     '" data-person_name="' +
     escapedName +
     '">' +
-    '<i class="ti ti-trash me-2"></i>' +
+    '<i class="fa-solid fa-trash me-2"></i>' +
     i18next.t("Delete") +
     "</button>" +
     "</div></div>"
@@ -510,7 +687,7 @@ window.CRM.renderFamilyActionMenu = (familyId, _familyName, options) => {
   return (
     '<div class="dropdown">' +
     '<button class="btn btn-sm btn-ghost-secondary" type="button" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">' +
-    '<i class="ti ti-dots-vertical"></i>' +
+    '<i class="fa-solid fa-ellipsis-vertical"></i>' +
     "</button>" +
     '<div class="dropdown-menu dropdown-menu-end">' +
     '<a class="dropdown-item" href="' +
@@ -518,17 +695,19 @@ window.CRM.renderFamilyActionMenu = (familyId, _familyName, options) => {
     "/people/family/" +
     familyId +
     '">' +
-    '<i class="ti ti-eye me-2"></i>' +
+    '<i class="fa-solid fa-eye me-2"></i>' +
     i18next.t("View") +
     "</a>" +
-    '<a class="dropdown-item" href="' +
-    root +
-    "/FamilyEditor.php?FamilyID=" +
-    familyId +
-    '">' +
-    '<i class="ti ti-pencil me-2"></i>' +
-    i18next.t("Edit") +
-    "</a>" +
+    (window.CRM.permissions && window.CRM.permissions.editRecords
+      ? '<a class="dropdown-item" href="' +
+        root +
+        "/FamilyEditor.php?FamilyID=" +
+        familyId +
+        '">' +
+        '<i class="fa-solid fa-pencil me-2"></i>' +
+        i18next.t("Edit") +
+        "</a>"
+      : "") +
     '<div class="dropdown-divider"></div>' +
     '<button class="dropdown-item ' +
     (inCart ? "RemoveFromCart text-danger" : "AddToCart") +
@@ -542,21 +721,20 @@ window.CRM.renderFamilyActionMenu = (familyId, _familyName, options) => {
     i18next.t("Remove from Cart") +
     '">' +
     '<i class="' +
-    (inCart ? "ti ti-shopping-cart-off" : "ti ti-shopping-cart-plus") +
+    (inCart ? "fa-solid fa-box-open" : "fa-solid fa-cart-shopping") +
     ' me-2"></i>' +
     '<span class="cart-label">' +
     (inCart ? i18next.t("Remove from Cart") : i18next.t("Add to Cart")) +
     "</span>" +
     "</button>" +
     '<div class="dropdown-divider"></div>' +
-    '<a class="dropdown-item text-danger" href="' +
-    root +
-    "/SelectDelete.php?FamilyID=" +
+    '<button type="button" class="dropdown-item text-danger delete-family"' +
+    ' data-family_id="' +
     familyId +
     '">' +
-    '<i class="ti ti-trash me-2"></i>' +
+    '<i class="fa-solid fa-trash me-2"></i>' +
     i18next.t("Delete") +
-    "</a>" +
+    "</button>" +
     "</div></div>"
   );
 };
@@ -581,20 +759,20 @@ window.CRM.renderEventActionMenu = (eventId, eventTitle, options) => {
     ? '<button type="button" class="dropdown-item activate-event" data-event_id="' +
       eventId +
       '">' +
-      '<i class="ti ti-circle-check me-2"></i>' +
+      '<i class="fa-solid fa-circle-check me-2"></i>' +
       i18next.t("Activate") +
       "</button>"
     : '<button type="button" class="dropdown-item deactivate-event" data-event_id="' +
       eventId +
       '">' +
-      '<i class="ti ti-circle-x me-2"></i>' +
+      '<i class="fa-solid fa-circle-xmark me-2"></i>' +
       i18next.t("Deactivate") +
       "</button>";
 
   return (
     '<div class="dropdown">' +
     '<button class="btn btn-sm btn-ghost-secondary" type="button" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">' +
-    '<i class="ti ti-dots-vertical"></i>' +
+    '<i class="fa-solid fa-ellipsis-vertical"></i>' +
     "</button>" +
     '<div class="dropdown-menu dropdown-menu-end">' +
     '<a class="dropdown-item" href="' +
@@ -602,7 +780,7 @@ window.CRM.renderEventActionMenu = (eventId, eventTitle, options) => {
     "/event/view/" +
     eventId +
     '">' +
-    '<i class="ti ti-eye me-2"></i>' +
+    '<i class="fa-solid fa-eye me-2"></i>' +
     i18next.t("View") +
     "</a>" +
     '<a class="dropdown-item" href="' +
@@ -610,7 +788,7 @@ window.CRM.renderEventActionMenu = (eventId, eventTitle, options) => {
     "/event/editor/" +
     eventId +
     '">' +
-    '<i class="ti ti-pencil me-2"></i>' +
+    '<i class="fa-solid fa-pencil me-2"></i>' +
     i18next.t("Edit") +
     "</a>" +
     '<a class="dropdown-item" href="' +
@@ -618,7 +796,7 @@ window.CRM.renderEventActionMenu = (eventId, eventTitle, options) => {
     "/event/checkin/" +
     eventId +
     '">' +
-    '<i class="ti ti-clipboard-check me-2"></i>' +
+    '<i class="fa-solid fa-clipboard-check me-2"></i>' +
     i18next.t("Check-in") +
     "</a>" +
     '<div class="dropdown-divider"></div>' +
@@ -630,7 +808,7 @@ window.CRM.renderEventActionMenu = (eventId, eventTitle, options) => {
     '" data-event_title="' +
     escapedTitle +
     '">' +
-    '<i class="ti ti-trash me-2"></i>' +
+    '<i class="fa-solid fa-trash me-2"></i>' +
     i18next.t("Delete") +
     "</button>" +
     "</div></div>"
@@ -661,8 +839,8 @@ window.CRM.renderEventActionMenu = (eventId, eventTitle, options) => {
           eventTitle +
           "</b>",
         buttons: {
-          cancel: { label: '<i class="ti ti-x"></i>' + i18next.t("Cancel") },
-          confirm: { label: '<i class="ti ti-trash"></i>' + i18next.t("Delete"), className: "btn-danger" },
+          cancel: { label: '<i class="fa-solid fa-xmark"></i>' + i18next.t("Cancel") },
+          confirm: { label: '<i class="fa-solid fa-trash"></i>' + i18next.t("Delete"), className: "btn-danger" },
         },
         callback: (result) => {
           if (result) {
@@ -722,14 +900,48 @@ window.CRM.renderEventActionMenu = (eventId, eventTitle, options) => {
           window.CRM.escapeHtml(String(personName || "")) +
           "</b>",
         buttons: {
-          cancel: { label: '<i class="ti ti-x"></i>' + i18next.t("Cancel") },
-          confirm: { label: '<i class="ti ti-trash"></i>' + i18next.t("Delete"), className: "btn-danger" },
+          cancel: { label: '<i class="fa-solid fa-xmark"></i>' + i18next.t("Cancel") },
+          confirm: { label: '<i class="fa-solid fa-trash"></i>' + i18next.t("Delete"), className: "btn-danger" },
         },
         callback: (result) => {
           if (result) {
             window.CRM.APIRequest({ method: "DELETE", path: "person/" + personId }).done(() => {
               window.location.href = window.CRM.root + "/people/list";
             });
+          }
+        },
+      });
+    });
+  }
+  if (window.CRM && window.CRM.localesLoaded) {
+    register();
+  } else {
+    window.addEventListener("CRM.localesReady", register, { once: true });
+  }
+})();
+
+// Global delegated handler for .delete-family buttons (rendered in DataTables or PHP templates).
+// Set up after locales are ready so i18next.t() is available in the confirmation dialog.
+(function setupFamilyDeleteHandler() {
+  function register() {
+    if (!window.jQuery) return;
+    window.jQuery(document).on("click", ".delete-family", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const $btn = window.jQuery(this);
+      const familyId = $btn.data("family_id");
+      bootbox.confirm({
+        title: i18next.t("Delete this family?"),
+        message: i18next.t(
+          "Do you want to delete this family? You'll be taken to a page to choose what to delete. This cannot be undone.",
+        ),
+        buttons: {
+          cancel: { label: '<i class="fa-solid fa-xmark"></i>' + i18next.t("Cancel") },
+          confirm: { label: '<i class="fa-solid fa-trash"></i>' + i18next.t("Delete"), className: "btn-danger" },
+        },
+        callback: (result) => {
+          if (result) {
+            window.location.href = window.CRM.root + "/SelectDelete.php?FamilyID=" + familyId;
           }
         },
       });

@@ -1,15 +1,35 @@
 <?php
 
-use ChurchCRM\Authentication\AuthenticationManager;
 use ChurchCRM\dto\Cart;
-use ChurchCRM\dto\ChurchMetaData;
-use ChurchCRM\dto\SystemConfig;
-use ChurchCRM\model\ChurchCRM\PersonQuery;
 use ChurchCRM\Slim\Middleware\Request\Auth\EmailRoleAuthMiddleware;
 use ChurchCRM\Slim\SlimUtils;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Routing\RouteCollectorProxy;
+
+/**
+ * @OA\Get(
+ *     path="/cart/emails",
+ *     summary="Get email addresses for all people currently in the session cart",
+ *     tags={"Cart"},
+ *     security={{"ApiKeyAuth":{}}},
+ *     @OA\Response(response=200, description="Email list for the current cart",
+ *         @OA\JsonContent(
+ *             @OA\Property(property="emails", type="array", @OA\Items(type="string"),
+ *                 description="Unique cart member email addresses (does not include sToEmailAddress, which the composer adds from the setting)")
+ *         )
+ *     ),
+ *     @OA\Response(response=401, description="Unauthorized"),
+ *     @OA\Response(response=403, description="Email permission required")
+ * )
+ */
+$app->get('/cart/emails', function (Request $request, Response $response): Response {
+    try {
+        return SlimUtils::renderJSON($response, ['emails' => Cart::getEmails()]);
+    } catch (\Throwable $e) {
+        return SlimUtils::renderErrorJSON($response, gettext('Failed to retrieve cart email addresses'), [], 500, $e, $request);
+    }
+})->add(EmailRoleAuthMiddleware::class);
 
 $app->group('/cart', function (RouteCollectorProxy $group): void {
     /**
@@ -239,7 +259,7 @@ $app->group('/cart', function (RouteCollectorProxy $group): void {
                 Cart::removeFamily((int)$cartPayload['Family']);
                 $sMessage = gettext('Family removed from cart');
             } else {
-                if (count($_SESSION['aPeopleCart']) > 0) {
+                if (!empty($_SESSION['aPeopleCart'])) {
                     $_SESSION['aPeopleCart'] = [];
                     $sMessage = gettext('Your cart has been successfully emptied');
                 }
@@ -253,179 +273,4 @@ $app->group('/cart', function (RouteCollectorProxy $group): void {
             return SlimUtils::renderErrorJSON($response, gettext('Invalid request data'), [], 400, $e, $request);
         }
     });
-
-    /**
-     * @OA\Post(
-     *     path="/cart/send-email",
-     *     summary="Send an email to cart members via the configured SMTP",
-     *     tags={"Cart"},
-     *     security={{"ApiKeyAuth":{}}},
-     *     @OA\RequestBody(
-     *         required=true,
-     *         @OA\JsonContent(
-     *             @OA\Property(property="to", type="string", description="Comma-separated recipient email addresses"),
-     *             @OA\Property(property="subject", type="string"),
-     *             @OA\Property(property="body", type="string"),
-     *             @OA\Property(property="individual", type="boolean", default=false)
-     *         )
-     *     ),
-     *     @OA\Response(response=200, description="Email sent successfully"),
-     *     @OA\Response(response=403, description="Permission denied or email not configured")
-     * )
-     */
-    $group->post('/send-email', function (Request $request, Response $response, array $args): Response {
-        $input = (array) $request->getParsedBody();
-        $toRaw = $input['to'] ?? '';
-        $subject = trim($input['subject'] ?? '');
-        $body = trim($input['body'] ?? '');
-        $individual = !empty($input['individual']);
-
-        if (empty($toRaw)) {
-            return SlimUtils::renderErrorJSON($response, gettext('No recipient email addresses provided'), [], 400);
-        }
-        if (empty($subject) && empty($body)) {
-            return SlimUtils::renderErrorJSON($response, gettext('Subject and body cannot both be empty'), [], 400);
-        }
-
-        // Split on comma or semicolon (frontend normalizes, but be safe)
-        $toAddresses = array_filter(array_map('trim', preg_split('/[,;]/', $toRaw)), function ($email) {
-            return !empty($email) && filter_var($email, FILTER_VALIDATE_EMAIL);
-        });
-
-        if (empty($toAddresses)) {
-            return SlimUtils::renderErrorJSON($response, gettext('No valid email addresses provided'), [], 400);
-        }
-
-        if (!SystemConfig::isEmailEnabled()) {
-            return SlimUtils::renderErrorJSON($response, gettext('Email is not configured on this system'), [], 400);
-        }
-
-        try {
-            $mailerConfig = function () {
-                $m = new \PHPMailer\PHPMailer\PHPMailer();
-                $m->IsSMTP();
-                $m->CharSet = 'UTF-8';
-                $m->Timeout = SystemConfig::getIntValue('iSMTPTimeout');
-                $m->Host = SystemConfig::getValue('sSMTPHost');
-                $m->SMTPAutoTLS = SystemConfig::getBooleanValue('bPHPMailerAutoTLS');
-                $m->SMTPSecure = SystemConfig::getValue('sPHPMailerSMTPSecure');
-                if (SystemConfig::getBooleanValue('bSMTPAuth')) {
-                    $m->SMTPAuth = true;
-                    $m->Username = SystemConfig::getValue('sSMTPUser');
-                    $m->Password = SystemConfig::getValue('sSMTPPass');
-                }
-                $m->SMTPDebug = 0;
-                $m->setFrom(
-                    ChurchMetaData::getChurchEmail(),
-                    ChurchMetaData::getChurchName()
-                );
-                $currentUser = AuthenticationManager::getCurrentUser();
-                $userEmail = trim((string) $currentUser->getEmail());
-                if (!empty($userEmail)) {
-                    $m->addReplyTo($userEmail, $currentUser->getFullName());
-                }
-                return $m;
-            };
-
-            if ($individual) {
-                // Build email→name map — first from cart people, then fall back to PersonQuery
-                $emailNames = [];
-                $cartPeople = \ChurchCRM\dto\Cart::getCartPeople();
-                foreach ($cartPeople as $person) {
-                    $peEmail = strtolower(trim((string) $person->getEmail()));
-                    if (!empty($peEmail)) {
-                        $emailNames[$peEmail] = [
-                            'firstName' => $person->getFirstName(),
-                            'lastName'  => $person->getLastName(),
-                        ];
-                    }
-                }
-
-                // Fallback: query Person for any emails not found in the cart
-                foreach ($toAddresses as $email) {
-                    $lookup = strtolower(trim($email));
-                    if (!isset($emailNames[$lookup])) {
-                        $person = \ChurchCRM\model\ChurchCRM\PersonQuery::create()
-                            ->filterByEmail($email)
-                            ->findOne();
-                        if ($person !== null) {
-                            $emailNames[$lookup] = [
-                                'firstName' => $person->getFirstName(),
-                                'lastName'  => $person->getLastName(),
-                            ];
-                        }
-                    }
-                }
-
-                $sentCount = 0;
-                $failCount = 0;
-                $failEmails = [];
-                foreach ($toAddresses as $email) {
-                    $mailer = $mailerConfig();
-                    $mailer->addAddress($email);
-
-                    $lookup = strtolower(trim($email));
-                    $firstName = $emailNames[$lookup]['firstName'] ?? '';
-                    $lastName  = $emailNames[$lookup]['lastName'] ?? '';
-                    $personalSubject = str_replace(
-                        ['{firstName}', '{lastName}'],
-                        [$firstName, $lastName],
-                        $subject
-                    );
-                    $personalBody = str_replace(
-                        ['{firstName}', '{lastName}'],
-                        [$firstName, $lastName],
-                        $body
-                    );
-
-                    $mailer->Subject = $personalSubject;
-                    $mailer->Body = nl2br($personalBody);
-                    $mailer->AltBody = $personalBody;
-                    $mailer->isHTML(true);
-                    if ($mailer->send()) {
-                        $sentCount++;
-                    } else {
-                        $failCount++;
-                        $failEmails[] = $email;
-                    }
-                }
-                if ($sentCount > 0) {
-                    $msg = sprintf(gettext('Email sent to %d of %d recipients'), $sentCount, count($toAddresses));
-                    if ($failCount > 0) {
-                        $msg .= ' ' . sprintf(gettext('(%d failed)'), $failCount);
-                    }
-                    return SlimUtils::renderJSON($response, [
-                        'success' => true,
-                        'message' => $msg,
-                        'sentCount' => $sentCount,
-                        'failCount' => $failCount,
-                        'failEmails' => $failEmails,
-                    ]);
-                }
-                return SlimUtils::renderErrorJSON($response, gettext('Failed to send any emails'), [], 500);
-            }
-
-            // Default: single email to all recipients
-            $phpMailer = $mailerConfig();
-            foreach ($toAddresses as $email) {
-                $phpMailer->addAddress($email);
-            }
-            $phpMailer->Subject = $subject;
-            $phpMailer->Body = nl2br($body);
-            $phpMailer->AltBody = $body;
-            $phpMailer->isHTML(true);
-
-            if ($phpMailer->send()) {
-                return SlimUtils::renderJSON($response, [
-                    'success' => true,
-                    'message' => gettext('Email sent successfully'),
-                    'recipientCount' => count($toAddresses),
-                ]);
-            }
-
-            return SlimUtils::renderErrorJSON($response, $phpMailer->ErrorInfo, [], 500);
-        } catch (\Throwable $e) {
-            return SlimUtils::renderErrorJSON($response, gettext('Failed to send email'), [], 500, $e, $request);
-        }
-    })->add(EmailRoleAuthMiddleware::class);
 });

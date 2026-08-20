@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Include/Config.php';
 require_once __DIR__ . '/Include/PageInit.php';
 
+use ChurchCRM\Authentication\AuthenticationManager;
 use ChurchCRM\dto\Classification;
 use ChurchCRM\dto\SystemConfig;
 use ChurchCRM\dto\SystemURLs;
@@ -11,6 +12,9 @@ use ChurchCRM\model\ChurchCRM\ListOptionQuery;
 use ChurchCRM\Utils\GeoUtils;
 use ChurchCRM\Utils\InputUtils;
 use ChurchCRM\view\PageHeader;
+
+// Security: User must have menu options permission to use this page
+AuthenticationManager::redirectHomeIfFalse(AuthenticationManager::getCurrentUser()->isMenuOptionsEnabled(), 'MenuOptions');
 
 function CompareDistance($elem1, $elem2)
 {
@@ -330,11 +334,12 @@ $families = FamilyQuery::create()
                         if ($counter >= $iNumNeighbors || $oneResult['Distance'] > $nMaxDistance) {
                             break;
                         } // Determine how many people in this family will be listed
-                        $sSQL = 'SELECT * FROM person_per WHERE per_fam_ID=' . $oneResult['fam_ID'];
+                        $sqlPerFamily = 'SELECT * FROM person_per WHERE per_fam_ID = ?';
                         if ($bClassificationPost) {
-                            $sSQL .= ' AND per_cls_ID IN (' . $sClassificationList . ')';
+                            // $sClassificationList contains trusted config-derived integer IDs (not user input)
+                            $sqlPerFamily .= ' AND per_cls_ID IN (' . $sClassificationList . ')';
                         }
-                        $rsPeople = RunQuery($sSQL);
+                        $rsPeople = RunPreparedQuery($sqlPerFamily, 'i', [(int) $oneResult['fam_ID']]);
                         $numListed = mysqli_num_rows($rsPeople);
 
                         if (!$numListed) { // skip families with zero members

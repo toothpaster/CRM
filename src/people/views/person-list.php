@@ -35,19 +35,21 @@ require SystemURLs::getDocumentRoot() . '/Include/Header.php';
 // Load compiled webpack assets for people list
 echo '<link rel="stylesheet" href="' . SystemURLs::getRootPath() . '/skin/v2/people-list.min.css">';
 echo '<script src="' . SystemURLs::getRootPath() . '/skin/v2/people-list.min.js"></script>';
-// Classification list
-$ListItem =  ListOptionQuery::create()->select('OptionName')->filterById(1)->find()->toArray();
+// Classification list — each entry is {id, name} so the JS can set option values to
+// the real DB OptionId (not a positional index). This fixes mismatched Classification
+// filter links when OptionId and insertion-sequence diverge (issue #9182).
+$ListItem = ListOptionQuery::create()->select(['OptionId', 'OptionName'])->filterById(1)->find()->toArray();
 $ClassificationList = [];
-$ClassificationList[] ="Unassigned";
+$ClassificationList[] = ['id' => 0, 'name' => gettext('Unassigned')];
 foreach ($ListItem as $element) {
-    $ClassificationList[] = $element;
+    $ClassificationList[] = ['id' => $element['OptionId'], 'name' => $element['OptionName']];
 }
-// Role list
-$ListItem = ListOptionQuery::create()->select('OptionName')->filterById(2)->find()->toArray();
+// Role list — same {id, name} structure so setValue(OptionId) matches correctly.
+$ListItem = ListOptionQuery::create()->select(['OptionId', 'OptionName'])->filterById(2)->find()->toArray();
 $RoleList = [];
-$RoleList[] ="Unassigned";
+$RoleList[] = ['id' => 0, 'name' => gettext('Unassigned')];
 foreach ($ListItem as $element) {
-    $RoleList[] = $element;
+    $RoleList[] = ['id' => $element['OptionId'], 'name' => $element['OptionName']];
 }
 // Person properties list
 $ListItem = PropertyQuery::create()->filterByProClass("p")->find();
@@ -59,6 +61,19 @@ foreach ($ListItem as $element) {
 $option_name = fn (string $t1, string $t2): string => $t1 . ':' . $t2;
 
 $allPersonCustomFields = PersonCustomMasterQuery::create()->find();
+
+// Build ordered, security-filtered custom field list for export columns.
+// Each entry becomes its own DataTables column (real name as header, formatted value as cell)
+// in the CSV and Print/PDF export.  The existing single 'Custom' filter column is marked
+// no-export so the raw JSON name-list no longer pollutes the export output.
+// We reuse the already-fetched $allPersonCustomFields collection (sorted in PHP) to avoid
+// an extra DB round-trip.
+$exportCustomFields = iterator_to_array($allPersonCustomFields, false);
+usort($exportCustomFields, fn($a, $b) => $a->getOrder() <=> $b->getOrder());
+$exportCustomFields = array_values(array_filter(
+    $exportCustomFields,
+    fn($cf) => AuthenticationManager::getCurrentUser()->isEnabledSecurity($cf->getFieldSecurity())
+));
 
 // Person custom list
 $ListItem = PersonCustomMasterQuery::create()->select(['Name', 'FieldSecurity', 'Id', 'TypeId', 'Special'])->find();
@@ -129,7 +144,7 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
             <i class="fa-solid fa-clipboard-check fa-2x"></i>
         </div>
         <div>
-            <strong><?= gettext('Data Quality:') ?></strong>
+            <strong><?= gettext('Data Quality') ?>:</strong>
             <?php
             $issues = [];
             if ($genderDataCheckCount > 0) {
@@ -154,7 +169,7 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
 
 <div class="card mb-3">
     <div class="card-header">
-        <h3 class="card-title"><i class="ti ti-filter me-1"></i> <span id="filters-title"></span></h3>
+        <h3 class="card-title"><i class="fa-solid fa-filter me-1"></i> <span id="filters-title"></span></h3>
     </div>
     <div class="card-body">
         <div class="row g-3">
@@ -205,7 +220,7 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
         </div>
         <div class="mt-3">
             <button id="ClearFilter" type="button" class="btn btn-secondary w-100">
-                <i class="ti ti-x me-1"></i> <span id="clear-filter-text"></span>
+                <i class="fa-solid fa-xmark me-1"></i> <span id="clear-filter-text"></span>
             </button>
         </div>
     </div>
@@ -213,14 +228,8 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
 
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title"><i class="ti ti-users me-1"></i> <span id="people-title"></span></h3>
-        <div style="margin-left:auto">
-            <button type="button" class="btn btn-sm btn-info" id="people-list-email-btn">
-                <i class="fa-regular fa-envelope me-1"></i><?= gettext('Email') ?>
-            </button>
-        </div>
+        <h3 class="card-title"><i class="fa-solid fa-users me-1"></i> <span id="people-title"></span></h3>
     </div>
-    <!-- DEBUG: people-list-email-btn should be above -->
     <div class="card-body">
         <table id="members" class="table table-vcenter table-hover data-table mb-0">
             <thead>
@@ -228,7 +237,7 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
                     <?php 
                     // Map of column names to localized display titles
                     $htmlColumnTitleMap = [
-                        'Id' => gettext('Id'),
+                        'Id' => gettext('ID'),
                         'Name' => gettext('Name'),
                         'Family Name' => gettext('Family Name'),
                         'Family Status' => gettext('Family Status'),
@@ -246,7 +255,19 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
                     foreach ($personListColumns as $column) {
                         // Output all columns - DataTables JS config controls visibility
                         $localizedHeader = $htmlColumnTitleMap[$column->name] ?? $column->name;
-                        echo '<th>' . $localizedHeader . '</th>';
+                        // The 'Custom' column holds filter JSON (field names), not user data;
+                        // exclude it from export and add per-field columns below instead.
+                        if ($column->name === 'Custom') {
+                            echo '<th class="no-export">' . $localizedHeader . '</th>';
+                        } else {
+                            echo '<th>' . $localizedHeader . '</th>';
+                        }
+                    }
+                    // Export columns: one <th> per accessible custom field with real name as header.
+                    // These are hidden on-screen (DataTables visibility config below) but included
+                    // in CSV/Print export so users see actual field values, not the filter JSON.
+                    foreach ($exportCustomFields as $cf) {
+                        echo '<th>' . InputUtils::escapeHTML($cf->getName()) . '</th>';
                     } ?>
                     <th class="no-export w-1"><?= gettext('Actions') ?></th>
                 </tr>
@@ -260,6 +281,18 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
             <tr>
                 <?php
                 $columns = $personListColumns;
+                // Fetch custom-field data once per person (single DB round-trip):
+                // returns both the filter name-list (for the hidden 'Custom' column)
+                // and the per-field formatted values (for the export columns).
+                $customFieldsResult  = $person->getCustomFieldsAll(
+                    $allPersonCustomFields,
+                    $CustomMapping,
+                    $CustomList,
+                    $option_name,
+                    $exportCustomFields
+                );
+                $customFilterNames   = $customFieldsResult['filterNames'];
+                $customExportValues  = $customFieldsResult['exportValues'];
                 foreach ($columns as $column) {
                     // Output ALL columns - DataTables JS config controls visibility
                     
@@ -288,7 +321,8 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
                         // Skip method call for Family Status column (handled separately below)
                         if (!isset($column->isFamilyStatus) || $column->isFamilyStatus !== true) {
                             if ($column->displayFunction === 'getCustomFields') {
-                                $columnData = [$person, $column->displayFunction]($allPersonCustomFields, $CustomMapping, $CustomList, $option_name);
+                                // Use pre-fetched result from getCustomFieldsAll (no extra DB query)
+                                $columnData = $customFilterNames;
                             } else {
                                 $columnData = [$person, $column->displayFunction]();
                             }
@@ -348,7 +382,7 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
                             if (is_array($columnData) && !empty($columnData)) {
                                 // Always render badges for display
                                 foreach ($columnData as $group) {
-                                    echo '<span class="badge bg-info me-1">' . InputUtils::escapeHTML($group) . '</span>';
+                                    echo '<span class="badge bg-info-lt text-info me-1">' . InputUtils::escapeHTML($group) . '</span>';
                                 }
                                 // Add hidden span with JSON for DataTables filtering
                                 echo '<span style="display:none;">' . InputUtils::escapeHTML(json_encode($columnData, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)) . '</span>';
@@ -408,21 +442,31 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
                     echo '</td>';
                 }
                 ?>
+                <?php
+                // Export columns: per-custom-field values for CSV/Print export.
+                // One <td> per accessible custom field, with the field's real formatted value.
+                // Values come from getCustomFieldsAll() called above (no extra DB query).
+                foreach ($exportCustomFields as $cf) {
+                    echo '<td>' . InputUtils::escapeHTML($customExportValues[$cf->getId()] ?? '') . '</td>';
+                }
+                ?>
                 <td>
                     <div class="dropdown">
                         <button class="btn btn-sm btn-ghost-secondary" type="button" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">
-                            <i class="ti ti-dots-vertical"></i>
+                            <i class="fa-solid fa-ellipsis-vertical"></i>
                         </button>
                         <div class="dropdown-menu dropdown-menu-end">
                             <a class="dropdown-item" href="<?= $person->getViewURI() ?>">
-                                <i class="ti ti-eye me-2"></i><?= gettext('View') ?>
+                                <i class="fa-solid fa-eye me-2"></i><?= gettext('View') ?>
                             </a>
+                            <?php if (AuthenticationManager::getCurrentUser()->isEditRecordsEnabled()): ?>
                             <a class="dropdown-item" href="<?= SystemURLs::getRootPath() ?>/PersonEditor.php?PersonID=<?= $person->getId() ?>">
-                                <i class="ti ti-pencil me-2"></i><?= gettext('Edit') ?>
+                                <i class="fa-solid fa-pencil me-2"></i><?= gettext('Edit') ?>
                             </a>
+                            <?php endif; ?>
                             <?php if ($person->getFamId()): ?>
                             <a class="dropdown-item" href="<?= Family::getFamilyViewURIForId((int) $person->getFamId()) ?>">
-                                <i class="ti ti-users me-2"></i><?= gettext('View Family') ?>
+                                <i class="fa-solid fa-users me-2"></i><?= gettext('View Family') ?>
                             </a>
                             <?php endif; ?>
                             <div class="dropdown-divider"></div>
@@ -433,16 +477,18 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
                                 data-cart-type="person"
                                 data-label-add="<?= gettext('Add to Cart') ?>"
                                 data-label-remove="<?= gettext('Remove from Cart') ?>">
-                                <i class="<?= $inCart ? 'ti ti-trash' : 'ti ti-shopping-cart-plus' ?> me-2"></i>
+                                <i class="<?= $inCart ? 'fa-solid fa-trash' : 'fa-solid fa-cart-plus' ?> me-2"></i>
                                 <span class="cart-label"><?= $inCart ? gettext('Remove from Cart') : gettext('Add to Cart') ?></span>
                             </button>
+                            <?php if (AuthenticationManager::getCurrentUser()->isDeleteRecordsEnabled()): ?>
                             <div class="dropdown-divider"></div>
                             <button type="button"
                                 class="dropdown-item text-danger delete-person"
                                 data-person_id="<?= $person->getId() ?>"
                                 data-person_name="<?= InputUtils::escapeAttribute($person->getFullName()) ?>">
-                                <i class="ti ti-trash me-2"></i><?= gettext('Delete') ?>
+                                <i class="fa-solid fa-trash me-2"></i><?= gettext('Delete') ?>
                             </button>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </td>
@@ -507,6 +553,11 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
                         echo"{ targets:" . $columnId .", visible: false },\n";
                     }
                 }
+                // Export custom-field columns are hidden on-screen but included in the export
+                foreach ($exportCustomFields as $cf) {
+                    $columnId++;
+                    echo "{ targets:" . $columnId . ", visible: false },\n";
+                }
                 ?>
             ],
             columns: [
@@ -517,7 +568,7 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
                 $columns = $personListColumns;
                 // Map of column names to localized display titles
                 $columnTitleMap = [
-                    'Id' => gettext('Id'),
+                    'Id' => gettext('ID'),
                     'Name' => gettext('Name'),
                     'Family Name' => gettext('Family Name'),
                     'Family Status' => gettext('Family Status'),
@@ -546,6 +597,12 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
                     }
                     echo json_encode($columnTitle) .",\n";
                 }
+                // Export custom-field columns: one title entry per accessible custom field.
+                // These columns are hidden on-screen (see columnDefs above) but exported.
+                foreach ($exportCustomFields as $cf) {
+                    $columnId++;
+                    echo json_encode(['title' => $cf->getName()], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR) . ",\n";
+                }
                 ?>
                 {
                     title:i18next.t('Actions'),
@@ -560,22 +617,6 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
         $.extend(dataTableConfig, window.CRM.plugin.dataTable);
 
         oTable = $('#members').DataTable(dataTableConfig);
-
-        // Email button — find mailto links in visible DataTable rows
-        $('#people-list-email-btn').on('click', function () {
-            var emails = [];
-            $('#members tbody tr:visible a[href^="mailto:"]').each(function () {
-                var email = $(this).text().trim();
-                if (email && email.indexOf('@') > -1) {
-                    emails.push(email);
-                }
-            });
-            if (emails.length === 0) {
-                window.CRM.notify(i18next.t('No email addresses available'), { type: 'warning', delay: 3000 });
-                return;
-            }
-            window.CRM.comm.openIndividual(emails.join(','));
-        });
 
         // Store TomSelect instances and filter configuration for later use
         var tomSelectInstances = {};
@@ -722,7 +763,7 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
             Object.keys(tomSelectInstances).forEach(function(colName) {
                 var instance = tomSelectInstances[colName];
                 if (instance && instance.ts) {
-                    instance.ts.clear(true); // true = trigger onChange event
+                    instance.ts.clear(); // default silent=false: onChange fires and filterColumn() resets the DataTable
                 }
             });
         });
@@ -847,34 +888,36 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
         }
         
         // Apply initial filters from URL parameters via TomSelect API
-        // This ensures filters are set and properly trigger DataTable updates
+        // This ensures filters are set and properly trigger DataTable updates.
+        // NOTE: setValue(value, false) — silent=false so onChange fires and filterColumn() is called.
+        // Using silent=true would visually select the option but never apply the DataTable search.
         setTimeout(function() {
             // Set Gender filter if specified
             if (shouldTriggerGenderFilter && filterByGender) {
                 var genderIndex = Gender.indexOf(filterByGender);
                 if (genderIndex !== -1 && tomSelectInstances['Gender']) {
-                    tomSelectInstances['Gender'].ts.setValue(String(genderIndex), true);
+                    tomSelectInstances['Gender'].ts.setValue(String(genderIndex), false);
                 }
             }
 
             // Set Classification filter if specified
             if (shouldTriggerClassificationFilter && tomSelectInstances['Classification']) {
                 // filterByClsOptionId comes from the route and is an integer
-                tomSelectInstances['Classification'].ts.setValue(String(serverVars.filterByClsId), true);
+                tomSelectInstances['Classification'].ts.setValue(String(serverVars.filterByClsId), false);
             }
 
             // Set Role filter if specified
             if (shouldTriggerRoleFilter && tomSelectInstances['Role']) {
                 // filterByFmrOptionId comes from the route and is an integer
-                tomSelectInstances['Role'].ts.setValue(String(serverVars.filterByFmrId), true);
+                tomSelectInstances['Role'].ts.setValue(String(serverVars.filterByFmrId), false);
             }
 
             // Set Family Status filter if specified
             if (shouldTriggerFamilyStatusFilter && tomSelectInstances['Family Status']) {
                 if (serverVars.familyActiveStatus === 'active') {
-                    tomSelectInstances['Family Status'].ts.setValue(serverVars.FamilyStatusList[0], true);
+                    tomSelectInstances['Family Status'].ts.setValue(serverVars.FamilyStatusList[0], false);
                 } else if (serverVars.familyActiveStatus === 'inactive') {
-                    tomSelectInstances['Family Status'].ts.setValue(serverVars.FamilyStatusList[1], true);
+                    tomSelectInstances['Family Status'].ts.setValue(serverVars.FamilyStatusList[1], false);
                 }
             }
         }, 100);
@@ -885,11 +928,8 @@ $hasDataQualityIssues = $genderDataCheckCount > 0 || $roleDataCheckCount > 0 ||
         window.CRM.onLocalesReady(initializePeopleList);
         // Photo viewer click handlers are registered globally in avatar-loader.ts
         // .delete-person clicks are handled globally by CRMJSOM.js
-
-
     });
 
 </script>
-<script src="<?= SystemURLs::getRootPath() ?>/skin/js/GroupEmailModal.js?v=<?= filemtime(SystemURLs::getDocumentRoot() . '/skin/js/GroupEmailModal.js') ?>"></script>
 <?php
 require SystemURLs::getDocumentRoot() .  '/Include/Footer.php';

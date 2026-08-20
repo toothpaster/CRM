@@ -10,6 +10,7 @@ use ChurchCRM\data\Countries;
 use ChurchCRM\dto\SystemConfig;
 use ChurchCRM\Service\FinancialService;
 use ChurchCRM\Utils\CsvExporter;
+use ChurchCRM\Utils\CurrencyFormatter;
 use ChurchCRM\Utils\DateTimeUtils;
 use ChurchCRM\Utils\InputUtils;
 use ChurchCRM\Utils\RedirectUtils;
@@ -153,8 +154,7 @@ if ($output === 'pdf') {
             $curY += 2 * SystemConfig::getValue('incrementY');
             if ($iDepID) {
                 // Get Deposit Date
-                $sSQL ="SELECT dep_Date, dep_Date FROM deposit_dep WHERE dep_ID='$iDepID'";
-                $rsDep = RunQuery($sSQL);
+                $rsDep = RunPreparedQuery('SELECT dep_Date, dep_Date FROM deposit_dep WHERE dep_ID = ?', 'i', [(int) $iDepID]);
                 [$sDateStart, $sDateEnd] = mysqli_fetch_row($rsDep);
             }
             if ($sDateStart == $sDateEnd) {
@@ -188,7 +188,7 @@ if ($output === 'pdf') {
                 $curX = 60;
                 $this->writeAt($curX, $curY, gettext('Please detach this slip and mail with your next gift.'));
                 $curY += (1.5 * SystemConfig::getValue('incrementY'));
-                $church_mailing = gettext('Please mail you next gift to ') . SystemConfig::getValue('sChurchName') . ', '
+                $church_mailing = sprintf(gettext('Please mail you next gift to %s'), SystemConfig::getValue('sChurchName')) . ', '
                     . SystemConfig::getValue('sChurchAddress') . ', ' . SystemConfig::getValue('sChurchCity') . ', ' . SystemConfig::getValue('sChurchState') . '  '
                     . SystemConfig::getValue('sChurchZip') . ', ' . gettext('Phone') . ': ' . SystemConfig::getValue('sChurchPhone');
                 $this->SetFont('Times', 'I', 10);
@@ -254,19 +254,19 @@ if ($output === 'pdf') {
             $pdf->Cell(20, $summaryIntervalY / 2, ' ', 0, 1);
             $pdf->Cell(95, $summaryIntervalY, ' ');
             $pdf->Cell(50, $summaryIntervalY, 'Total Payments:');
-            $totalAmountStr = '$' . number_format($totalAmount, 2);
+            $totalAmountStr = CurrencyFormatter::formatForPdf($totalAmount);
             $pdf->SetFont('Courier', '', 9);
             $pdf->Cell(25, $summaryIntervalY, $totalAmountStr, 0, 1, 'R');
             $pdf->SetFont('Times', 'B', 10);
             $pdf->Cell(95, $summaryIntervalY, ' ');
             $pdf->Cell(50, $summaryIntervalY, 'Goods and Services Rendered:');
-            $totalAmountStr = '$' . number_format($totalNonDeductible, 2);
+            $totalAmountStr = CurrencyFormatter::formatForPdf($totalNonDeductible);
             $pdf->SetFont('Courier', '', 9);
             $pdf->Cell(25, $summaryIntervalY, $totalAmountStr, 0, 1, 'R');
             $pdf->SetFont('Times', 'B', 10);
             $pdf->Cell(95, $summaryIntervalY, ' ');
             $pdf->Cell(50, $summaryIntervalY, 'Tax-Deductible Contribution:');
-            $totalAmountStr = '$' . number_format($totalAmount - $totalNonDeductible, 2);
+            $totalAmountStr = CurrencyFormatter::formatForPdf($totalAmount - $totalNonDeductible);
             $pdf->SetFont('Courier', '', 9);
             $pdf->Cell(25, $summaryIntervalY, $totalAmountStr, 0, 1, 'R');
             $curY = $pdf->GetY();
@@ -340,7 +340,7 @@ if ($output === 'pdf') {
         $pdf->Cell(40, $summaryIntervalY, $fun_Name);
         $pdf->Cell(40, $summaryIntervalY, $plg_comment);
         $pdf->SetFont('Courier', '', 9);
-        $pdf->Cell(25, $summaryIntervalY, $plg_amount, 0, 1, 'R');
+        $pdf->Cell(25, $summaryIntervalY, CurrencyFormatter::formatForPdf($plg_amount), 0, 1, 'R');
         $totalAmount += $plg_amount;
         $totalNonDeductible += $plg_NonDeductible;
         $cnt += 1;
@@ -373,19 +373,19 @@ if ($output === 'pdf') {
     $pdf->Cell(20, $summaryIntervalY / 2, ' ', 0, 1);
     $pdf->Cell(95, $summaryIntervalY, ' ');
     $pdf->Cell(50, $summaryIntervalY, 'Total Payments:');
-    $totalAmountStr = '$' . number_format($totalAmount, 2);
+    $totalAmountStr = CurrencyFormatter::formatForPdf($totalAmount);
     $pdf->SetFont('Courier', '', 9);
     $pdf->Cell(25, $summaryIntervalY, $totalAmountStr, 0, 1, 'R');
     $pdf->SetFont('Times', 'B', 10);
     $pdf->Cell(95, $summaryIntervalY, ' ');
     $pdf->Cell(50, $summaryIntervalY, 'Goods and Services Rendered:');
-    $totalAmountStr = '$' . number_format($totalNonDeductible, 2);
+    $totalAmountStr = CurrencyFormatter::formatForPdf($totalNonDeductible);
     $pdf->SetFont('Courier', '', 9);
     $pdf->Cell(25, $summaryIntervalY, $totalAmountStr, 0, 1, 'R');
     $pdf->SetFont('Times', 'B', 10);
     $pdf->Cell(95, $summaryIntervalY, ' ');
     $pdf->Cell(50, $summaryIntervalY, 'Tax-Deductible Contribution:');
-    $totalAmountStr = '$' . number_format($totalAmount - $totalNonDeductible, 2);
+    $totalAmountStr = CurrencyFormatter::formatForPdf($totalAmount - $totalNonDeductible);
     $pdf->SetFont('Courier', '', 9);
     $pdf->Cell(25, $summaryIntervalY, $totalAmountStr, 0, 1, 'R');
     $curY = $pdf->GetY();

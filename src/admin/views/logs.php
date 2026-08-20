@@ -138,18 +138,18 @@ $currentLevelLabel = $logLevelMap[$currentLogLevel] ?? 'INFO';
                                     <td class="text-center w-1">
                                         <div class="dropdown">
                                             <button class="btn btn-sm btn-ghost-secondary" type="button" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">
-                                                <i class="ti ti-dots-vertical"></i>
+                                                <i class="fa-solid fa-ellipsis-vertical"></i>
                                             </button>
                                             <div class="dropdown-menu dropdown-menu-end">
                                                 <a class="dropdown-item view-log" href="#" data-log-name="<?= InputUtils::escapeHTML($logFile['name']) ?>">
-                                                    <i class="ti ti-eye me-2"></i><?= gettext('View') ?>
+                                                    <i class="fa-solid fa-eye me-2"></i><?= gettext('View') ?>
                                                 </a>
                                                 <a class="dropdown-item download-log" href="#" data-log-name="<?= InputUtils::escapeHTML($logFile['name']) ?>">
-                                                    <i class="ti ti-download me-2"></i><?= gettext('Download') ?>
+                                                    <i class="fa-solid fa-download me-2"></i><?= gettext('Download') ?>
                                                 </a>
                                                 <div class="dropdown-divider"></div>
                                                 <a class="dropdown-item text-danger delete-log" href="#" data-log-name="<?= InputUtils::escapeHTML($logFile['name']) ?>">
-                                                    <i class="ti ti-trash me-2"></i><?= gettext('Delete') ?>
+                                                    <i class="fa-solid fa-trash me-2"></i><?= gettext('Delete') ?>
                                                 </a>
                                             </div>
                                         </div>
@@ -179,7 +179,7 @@ $currentLevelLabel = $logLevelMap[$currentLogLevel] ?? 'INFO';
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label><?= gettext('Filter by log level:') ?></label>
+                    <label><?= gettext('Filter by log level') ?>:</label>
                     <div class="btn-group btn-group-sm" role="group">
                         <button type="button" class="btn btn-outline-secondary log-filter active" data-level="all"><?= gettext('All') ?></button>
                         <button type="button" class="btn btn-outline-danger log-filter" data-level="ERROR"><?= gettext('Error') ?></button>
@@ -189,7 +189,7 @@ $currentLevelLabel = $logLevelMap[$currentLogLevel] ?? 'INFO';
                     </div>
                 </div>
                 <div class="mb-3">
-                    <label><?= gettext('Number of lines to display:') ?></label>
+                    <label><?= gettext('Number of lines to display') ?>:</label>
                     <select class="form-select form-select-sm" id="logLinesLimit" style="width: auto; display: inline-block;">
                         <option value="50">50</option>
                         <option value="100" selected>100</option>

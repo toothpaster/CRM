@@ -13,12 +13,19 @@ use ChurchCRM\view\PageHeader;
 $sPageTitle = gettext('Query View');
 $sPageSubtitle = gettext('View query results');
 
+// GHSA-6rgg-mrx3-92w7: QueryView.php is deprecated. Gate behind admin to prevent
+// zero-permission users from reaching the parameterised SQL runner.
+if (!AuthenticationManager::getCurrentUser()->isAdmin()) {
+    RedirectUtils::securityRedirect('Admin');
+    exit;
+}
+
 // Get the QueryID from the querystring
 $iQueryID = InputUtils::legacyFilterInput($_GET['QueryID'], 'int');
 
-$aFinanceQueries = explode(',', SystemConfig::getValue('aFinanceQueries'));
+$aFinanceQueries = array_map('intval', explode(',', SystemConfig::getValue('aFinanceQueries')));
 
-if (!AuthenticationManager::getCurrentUser()->isFinanceEnabled() && in_array($iQueryID, $aFinanceQueries)) {
+if (!AuthenticationManager::getCurrentUser()->isFinanceEnabled() && in_array((int) $iQueryID, $aFinanceQueries, true)) {
     RedirectUtils::redirect('v2/dashboard');
 }
 
@@ -29,13 +36,11 @@ $aBreadcrumbs = PageHeader::breadcrumbs([
 require_once __DIR__ . '/Include/Header.php';
 
 // Get the query information
-$sSQL = 'SELECT * FROM query_qry WHERE qry_ID = ' . $iQueryID;
-$rsSQL = RunQuery($sSQL);
+$rsSQL = RunPreparedQuery('SELECT * FROM query_qry WHERE qry_ID = ?', 'i', [(int) $iQueryID]);
 extract(mysqli_fetch_array($rsSQL));
 
 // Get the parameters for this query
-$sSQL = 'SELECT * FROM queryparameters_qrp WHERE qrp_qry_ID = ' . $iQueryID . ' ORDER BY qrp_ID';
-$rsParameters = RunQuery($sSQL);
+$rsParameters = RunPreparedQuery('SELECT * FROM queryparameters_qrp WHERE qrp_qry_ID = ? ORDER BY qrp_ID', 'i', [(int) $iQueryID]);
 
 // If the form was submitted or there are no parameters, run the query
 if (isset($_POST['Submit']) || mysqli_num_rows($rsParameters) === 0) {
@@ -99,11 +104,11 @@ function ValidateInput()
                         // Is it more than the minimum?
                         if ($_POST[$qrp_Alias] < $qrp_NumericMin) {
                             $bError = true;
-                            $aErrorText[$qrp_Alias] = gettext('This value must be at least ') . $qrp_NumericMin;
+                            $aErrorText[$qrp_Alias] = sprintf(gettext('This value must be at least %s'), $qrp_NumericMin);
                         } elseif ($_POST[$qrp_Alias] > $qrp_NumericMax) {
                             // Is it less than the maximum?
                             $bError = true;
-                            $aErrorText[$qrp_Alias] = gettext('This value cannot be more than ') . $qrp_NumericMax;
+                            $aErrorText[$qrp_Alias] = sprintf(gettext('This value cannot be more than %s'), $qrp_NumericMax);
                         }
                     }
 
@@ -115,11 +120,11 @@ function ValidateInput()
                     // Is the length less than the maximum?
                     if (strlen($_POST[$qrp_Alias]) > $qrp_AlphaMaxLength) {
                         $bError = true;
-                        $aErrorText[$qrp_Alias] = gettext('This value cannot be more than ') . $qrp_AlphaMaxLength . gettext(' characters long');
+                        $aErrorText[$qrp_Alias] = sprintf(gettext('This value cannot be more than %d characters long'), $qrp_AlphaMaxLength);
                     } elseif (strlen($_POST[$qrp_Alias]) < $qrp_AlphaMinLength) {
                         // Is the length more than the minimum?
                         $bError = true;
-                        $aErrorText[$qrp_Alias] = gettext('This value cannot be less than ') . $qrp_AlphaMinLength . gettext(' characters long');
+                        $aErrorText[$qrp_Alias] = sprintf(gettext('This value cannot be less than %d characters long'), $qrp_AlphaMinLength);
                     }
 
                     $vPOST[$qrp_Alias] = InputUtils::legacyFilterInput($_POST[$qrp_Alias]);
@@ -190,7 +195,7 @@ function DisplayRecordCount()
     if ($qry_Count === 1) {
         //Display the count of the recordset
         echo '<p class="text-center">';
-        echo mysqli_num_rows($rsQueryResults) . gettext(' record(s) returned');
+        echo sprintf(gettext('%d record(s) returned'), mysqli_num_rows($rsQueryResults));
         echo '</p>';
     }
 }
@@ -212,7 +217,7 @@ function DoQuery()
 
     <div class="card-body">
         <p class="text-end">
-            <?= $qry_Count ? mysqli_num_rows($rsQueryResults) . gettext(' record(s) returned') : ''; ?>
+            <?= $qry_Count ? sprintf(gettext('%d record(s) returned'), mysqli_num_rows($rsQueryResults)) : ''; ?>
         </p>
 
         <div class="table-responsive">
@@ -354,47 +359,83 @@ function getQueryFormInput($queryParameters)
             $sSQL = 'SELECT * FROM queryparameteroptions_qpo WHERE qpo_qrp_ID = ' . $qrp_ID;
             $rsParameterOptions = RunQuery($sSQL);
 
-            $input = '<select name="' . $qrp_Alias . '" class="form-select">';
-            $input .= '<option disabled selected value> -- ' . gettext("select an option") . ' -- </option>';
-
-            // Loop through the parameter options
-            while ($ThisRow = mysqli_fetch_array($rsParameterOptions)) {
-                extract($ThisRow);
-                $input .= '<option value="' . $qpo_Value . '">' . gettext($qpo_Display) . '</option>';
+            // Buffer all rows so we can detect empty results
+            $aOptionRows = [];
+            while ($rsParameterOptions && $ThisRow = mysqli_fetch_array($rsParameterOptions)) {
+                $aOptionRows[] = $ThisRow;
             }
 
-            $input .= '</select>';
+            if (empty($aOptionRows)) {
+                $input = '<div class="text-muted small">' .
+                    InputUtils::escapeHTML(
+                        sprintf(gettext('No "%s" options are configured yet. Add the relevant records first.'), gettext($qrp_Name))
+                    ) . '</div>';
+            } else {
+                $input = '<select name="' . $qrp_Alias . '" class="form-select">';
+                $input .= '<option disabled selected value> -- ' . gettext('select an option') . ' -- </option>';
+                foreach ($aOptionRows as $ThisRow) {
+                    extract($ThisRow);
+                    $input .= '<option value="' . InputUtils::escapeHTML($qpo_Value) . '">' . InputUtils::escapeHTML(gettext($qpo_Display)) . '</option>';
+                }
+                $input .= '</select>';
+            }
             break;
 
         // SELECT box with OPTION tags provided via a SQL query
         case 2:
-            // Run the SQL to get the options
-            $rsParameterOptions = RunQuery($qrp_OptionSQL);
+            // Run the SQL to get the options; guard against query failure
+            $rsParameterOptions = $qrp_OptionSQL ? RunQuery($qrp_OptionSQL, false) : false;
 
-            $input .= '<select name="' . $qrp_Alias . '" class="form-select">';
-            $input .= '<option disabled selected value> -- select an option -- </option>';
-
-            while ($ThisRow = mysqli_fetch_array($rsParameterOptions)) {
-                extract($ThisRow);
-                $input .= '<option value="' . $Value . '">' . $Display . '</option>';
+            // Buffer all rows so we can detect empty results
+            $aOptionRows = [];
+            while ($rsParameterOptions && $ThisRow = mysqli_fetch_array($rsParameterOptions)) {
+                $aOptionRows[] = $ThisRow;
             }
 
-            $input .= '</select>';
+            if (empty($aOptionRows)) {
+                // #8898 / #8899: when no options exist the select previously rendered as a
+                // lone disabled placeholder, appearing greyed-out and non-functional.
+                // Show a clear empty-state message instead.
+                $input = '<div class="text-muted small">' .
+                    InputUtils::escapeHTML(
+                        sprintf(gettext('No "%s" options are available yet. Add the relevant records first.'), gettext($qrp_Name))
+                    ) . '</div>';
+            } else {
+                $input = '<select name="' . $qrp_Alias . '" class="form-select">';
+                $input .= '<option disabled selected value> -- ' . gettext('select an option') . ' -- </option>';
+                foreach ($aOptionRows as $ThisRow) {
+                    extract($ThisRow);
+                    $input .= '<option value="' . InputUtils::escapeHTML($Value) . '">' . InputUtils::escapeHTML($Display) . '</option>';
+                }
+                $input .= '</select>';
+            }
             break;
 
         case 3:
-            // Run the SQL to get the options
-            $rsParameterOptions = RunQuery($qrp_OptionSQL);
+            // Run the SQL to get the options; guard against query failure
+            $rsParameterOptions = $qrp_OptionSQL ? RunQuery($qrp_OptionSQL, false) : false;
 
-            $input .= '<select name="' . $qrp_Alias . '[]" class="form-select" size="10" multiple="multiple">';
-            $input .= '<option disabled selected value> -- select an option -- </option>';
-
-            while ($ThisRow = mysqli_fetch_array($rsParameterOptions)) {
-                extract($ThisRow);
-                $input .= '<option value="' . $Value . '">' . $Display . '</option>';
+            // Buffer all rows so we can detect empty results
+            $aOptionRows = [];
+            while ($rsParameterOptions && $ThisRow = mysqli_fetch_array($rsParameterOptions)) {
+                $aOptionRows[] = $ThisRow;
             }
 
-            $input .= '</select>';
+            if (empty($aOptionRows)) {
+                // Same empty-state treatment as case 2 for multiselects (#8898).
+                $input = '<div class="text-muted small">' .
+                    InputUtils::escapeHTML(
+                        sprintf(gettext('No "%s" options are available yet. Add the relevant records first.'), gettext($qrp_Name))
+                    ) . '</div>';
+            } else {
+                $input = '<select name="' . $qrp_Alias . '[]" class="form-select" size="10" multiple="multiple">';
+                $input .= '<option disabled selected value> -- ' . gettext('select an option') . ' -- </option>';
+                foreach ($aOptionRows as $ThisRow) {
+                    extract($ThisRow);
+                    $input .= '<option value="' . InputUtils::escapeHTML($Value) . '">' . InputUtils::escapeHTML($Display) . '</option>';
+                }
+                $input .= '</select>';
+            }
             break;
     }
 

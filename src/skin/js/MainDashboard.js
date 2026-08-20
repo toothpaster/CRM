@@ -85,7 +85,7 @@ export function initializeMainDashboard() {
           statusHtml =
             ' <span class="badge bg-secondary-lt text-secondary" title="' +
             i18next.t("Inactive") +
-            '"><i class="ti ti-power me-1"></i>' +
+            '"><i class="fa-solid fa-power-off me-1"></i>' +
             i18next.t("Inactive") +
             "</span>";
         }
@@ -98,7 +98,7 @@ export function initializeMainDashboard() {
           "/people/family/" +
           row.FamilyId +
           '"><strong>' +
-          row.Name +
+          window.CRM.escapeHtml(row.Name) +
           "</strong></a>" +
           statusHtml +
           "</div>"
@@ -117,10 +117,19 @@ export function initializeMainDashboard() {
           // Try to get city and state (usually 2nd and 3rd from end, before country)
           const cityState = parts.slice(-3, -1).join(", ");
           if (cityState) {
-            return '<span title="' + data + '">' + cityState + "</span>";
+            return (
+              '<span title="' + window.CRM.escapeAttribute(data) + '">' + window.CRM.escapeHtml(cityState) + "</span>"
+            );
           }
         }
-        return '<span title="' + data + '">' + data.substring(0, 30) + (data.length > 30 ? "..." : "") + "</span>";
+        return (
+          '<span title="' +
+          window.CRM.escapeAttribute(data) +
+          '">' +
+          window.CRM.escapeHtml(data.substring(0, 30)) +
+          (data.length > 30 ? "..." : "") +
+          "</span>"
+        );
       },
     },
   ];
@@ -255,7 +264,7 @@ export function initializeMainDashboard() {
             "/people/view/" +
             row.PersonId +
             '"><strong>' +
-            row.FormattedName +
+            window.CRM.escapeHtml(row.FormattedName) +
             "</strong></a>" +
             ageText +
             "</div></div>"
@@ -292,7 +301,7 @@ export function initializeMainDashboard() {
               i18next.t("ago") +
               "</span>";
           }
-          return row.Birthday + " " + badge;
+          return row.Birthday + '<div class="small lh-1 mt-1">' + badge + "</div>";
         },
       },
     ],
@@ -359,7 +368,7 @@ export function initializeMainDashboard() {
             "/people/family/" +
             row.FamilyId +
             '"><strong>' +
-            data +
+            window.CRM.escapeHtml(data) +
             "</strong></a></div></div>"
           );
         },
@@ -406,7 +415,7 @@ export function initializeMainDashboard() {
               i18next.t("ago") +
               "</span>";
           }
-          return data + badge;
+          return data + '<div class="small lh-1 mt-1">' + badge + "</div>";
         },
       },
     ],
@@ -462,9 +471,7 @@ export function initializeMainDashboard() {
           "/people/view/" +
           row.PersonId +
           '"><strong>' +
-          row.FirstName +
-          " " +
-          row.LastName +
+          window.CRM.escapeHtml(row.FirstName + " " + row.LastName) +
           "</strong></a></div>"
         );
       },
@@ -484,12 +491,19 @@ export function initializeMainDashboard() {
           statusHtml =
             ' <span class="badge bg-secondary-lt text-secondary" title="' +
             i18next.t("Inactive") +
-            '"><i class="ti ti-power me-1"></i>' +
+            '"><i class="fa-solid fa-power-off me-1"></i>' +
             i18next.t("Inactive") +
             "</span>";
         }
         return (
-          '<a href="' + window.CRM.root + "/people/family/" + row.FamilyId + '">' + row.FamilyName + "</a>" + statusHtml
+          '<a href="' +
+          window.CRM.root +
+          "/people/family/" +
+          row.FamilyId +
+          '">' +
+          window.CRM.escapeHtml(row.FamilyName) +
+          "</a>" +
+          statusHtml
         );
       },
     },
@@ -556,7 +570,20 @@ export function initializeMainDashboard() {
       window.CRM.peopleImageLoader.refresh();
     }
   });
+  // Last time syncCartButtons() actually issued API requests (debounce guard).
+  let lastCartSync = 0;
   function syncCartButtons() {
+    // Debounce: DataTables fire a draw event for every table (and on every
+    // paginate/search/refresh), which previously fired cart/ + familiesInCart
+    // requests ~12 times per dashboard load. One sync per 2s window is plenty
+    // and keeps the request (and MySQL connection) burst well under shared
+    // hosting rate limits (e.g. Hostinger's 20 new connections/second).
+    const now = Date.now();
+    if (now - lastCartSync < 2000) {
+      return;
+    }
+    lastCartSync = now;
+
     if (window.CRM && window.CRM.cartManager) {
       Promise.all([
         window.CRM.APIRequest({
@@ -569,24 +596,23 @@ export function initializeMainDashboard() {
           path: "families/familiesInCart",
           suppressErrorDialog: true,
         }),
-      ]).then((responses) => {
-        const cartData = responses[0];
-        const familiesData = responses[1];
+      ])
+        .then((responses) => {
+          const cartData = responses[0];
+          const familiesData = responses[1];
 
-        const peopleInCart = cartData.PeopleCart || [];
-        const familiesInCart = familiesData.familiesInCart || [];
-        const groupsInCart = cartData.GroupCart || [];
+          const peopleInCart = cartData.PeopleCart || [];
+          const familiesInCart = familiesData.familiesInCart || [];
+          const groupsInCart = cartData.GroupCart || [];
 
-        window.CRM.cartManager.syncButtonStates(peopleInCart, familiesInCart, groupsInCart);
-      });
+          window.CRM.cartManager.syncButtonStates(peopleInCart, familiesInCart, groupsInCart);
+        })
+        .catch(() => {
+          // suppressErrorDialog above already silences the UI; still need a
+          // handler here so a denied request (e.g. a zero-permission user)
+          // doesn't surface as an unhandled promise rejection.
+        });
     }
-  }
-
-  function buildRenderEmail(email) {
-    if (email) {
-      return "<a href='mailto:" + email + "' target='_blank' rel='noopener noreferrer'>" + email + "</a>";
-    }
-    return "";
   }
 
   // Today's Events widget
